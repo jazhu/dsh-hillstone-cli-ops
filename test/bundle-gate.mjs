@@ -125,6 +125,15 @@ const checks = [
   // flips a microtask after openSession returns. Opening the tab in the same
   // tick would aim at the session the user is leaving — the bug itself.
   ['client  waits for the session switch to land', /setTimeout\(\(\) => \{/  , client],
+  // m04806: a fresh connection must land the operator on 终端, not on 设备管理.
+  // The tab body only exists while the tab is open, so a notify that fires while
+  // nobody is listening is dropped on the floor — the intent has to be parked
+  // first and claimed by the body when it mounts. The bare boolean this replaced
+  // could be claimed by any conversation's panel, one layer of the same bug.
+  ['client  a connection parks its 终端 intent until the tab mounts', /pendingReveals\.add\(/, client],
+  ['client  a parked intent is claimed by its own session only', /function takePendingReveal\(sessionId\)|takePendingReveal = function \(sessionId\)/, client],
+  ['client  the body is told which session it belongs to', /OpsPage\(props = \{\}\)|OpsPage\(\{ ?sessionId ?\}|sessionId\?: string/, client],
+  ['client  the reveal asks before it opens the tab', /requestRevealTerminal\(c\.originSessionId\)[\s\S]{0,400}?revealSidebar\?\.\(c\.originSessionId\)/, client],
 ]
 
 // Assert the ABSENCE directly: every check above greps dist/, so a removed
@@ -146,6 +155,13 @@ if (headerButton) bad++
 const railIcon = /icon: IconComponent/.test(client)
 console.log(`${railIcon ? '  ok  ' : '  MISS'} client  right-rail tab keeps its guide icon`)
 if (!railIcon) bad++
+
+// m04806 — the parked 终端 intent used to be one boolean, which any conversation's
+// panel could claim. That is the same cross-session mistake as m04040 one layer
+// down, so the boolean must not come back under any name.
+const bareIntent = /pendingRevealTerminal\b/.test(client)
+console.log(`${bareIntent ? '  MISS' : '  ok  '} client  no session-agnostic reveal flag (m04806)`)
+if (bareIntent) bad++
 
 for (const [name, re, hay] of checks) {
   const ok = re.test(hay)

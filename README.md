@@ -18,7 +18,7 @@ terminal). Both are built from one `src/` tree.
 | Tab | What it does |
 | --- | --- |
 | **设备管理** | CRUD devices (name / IP / account / password / SSH port / device type / web port / note). 新增, 复制 and 编辑 all run in one centred dialog. |
-| **终端** | One xterm.js terminal per live connection. Input goes to the host, device output streams back over SSE. |
+| **终端** | One xterm.js terminal per live connection. Input goes to the host, device output streams back over SSE. A new connection switches this panel straight to 终端, so you land on the live session instead of the device list. |
 | **日志** | The per-connection audit trail: who connected to which device, what was typed, which commands were run, when and why the session ended. |
 
 **Seven agent tools**, so the assistant can operate devices without you:
@@ -160,6 +160,26 @@ there. The switch publishes the on-screen session through a subscription, so the
 the exact bug being fixed. Re-opening a tab that already exists only focuses it
 and never expands the column, hence the `isExpanded()` / `toggleExpanded()`
 fallback.
+
+### A connection lands you on 终端, not on 设备管理
+
+Opening the panel is only half the job. The tab body is mounted by the sidebar,
+so if the connection is noticed while the tab is still closed there is nobody
+listening — the notification fires into the void and the panel comes up showing
+the device list, which is the one view that says nothing about what the agent is
+doing on the device right now.
+
+So the intent to show the terminal is **parked before** the tab is opened, keyed
+by the session it belongs to, and the body claims it on mount. Both halves of
+that ordering matter. Parking first survives the case where `openTab` mounts the
+body synchronously; asking first is what covers the case where the tab was never
+open at all, and m04040 means the body that answers may be a different
+conversation's, arriving a tick later.
+
+An earlier version parked a single boolean. It looked correct in the common case
+— one session, one panel — and would be claimed by whichever conversation's panel
+happened to mount first, which is the same wrong-session bug one layer down. The
+per-session map is what keeps that from coming back.
 
 ### A local API on a fixed port
 

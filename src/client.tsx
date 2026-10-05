@@ -197,6 +197,16 @@ function onPendingConnect(fn: () => void): () => void {
 // host-side connect used to be invisible until the user happened to open the
 // panel and look at the session list.
 const revealListeners = new Set<() => void>()
+// The tab body is only mounted once the sidebar tab is open, and the notify can
+// happen before that — m04040 opens the tab first, but on a session that has
+// never had a sidebar the openTabIn/openSession dance can take a tick. So a
+// connection made while the tab was closed used to open the panel on 设备管理
+// instead of 终端, which is exactly the thing the operator does not want to see
+// when an agent is working on a device for them. The intent therefore has to
+// survive until mount, keyed by the session it belongs to: a bare boolean would
+// be consumed by whichever conversation's panel happens to mount first, which is
+// the same cross-session mistake one layer down.
+const pendingReveals = new Set<string>()
 // Takes the session that asked for the connection, so the tab can open there
 // (m04040) instead of in whatever session happens to be on screen.
 let revealSidebar: ((originSessionId?: string) => void) | null = null
@@ -211,6 +221,34 @@ let panelSessionId: string | null = null
 function onRevealTerminal(fn: () => void): () => void {
   revealListeners.add(fn)
   return () => { revealListeners.delete(fn) }
+}
+
+// Ask every mounted panel to switch to 终端, or — if none is mounted, which is the
+// normal case when the connection came from the agent — park the intent for the
+// session that owns it so OpsPage can pick it up when it mounts.
+function requestRevealTerminal(originSessionId?: string): void {
+  if (revealListeners.size > 0) {
+    for (const fn of [...revealListeners]) fn()
+    // A mounted panel can only ever be the one on screen. If the connection
+    // belongs to a DIFFERENT session, m04040 is about to move the main column
+    // there, which unmounts this body and mounts the right one a tick later.
+    // Notifying now would light up the wrong conversation, and the mount below
+    // would find nothing left to consume — so park it as well.
+    if (originSessionId && originSessionId !== panelSessionId) {
+      pendingReveals.add(originSessionId)
+    }
+    return
+  }
+  pendingReveals.add(originSessionId ?? panelSessionId ?? '')
+}
+
+// Consume a parked intent, but only for our own session. An intent parked for
+// another conversation is left alone.
+function takePendingReveal(sessionId: string | null): boolean {
+  const key = sessionId ?? ''
+  if (!pendingReveals.has(key)) return false
+  pendingReveals.delete(key)
+  return true
 }
 
 // The poll only opens the panel, and only for a session the panel has never
@@ -250,7 +288,13 @@ function startConnectWatch(): void {
         prev = now
         for (const c of list) seenConnIds.add(c.connId)
         if (fresh.length) {
-          for (const fn of [...revealListeners]) fn()
+          // Park the intent FIRST, then open the tab. The order is not cosmetic:
+          // m04040 may have to switch the on-screen session and the sidebar
+          // follows that signal a tick later, so the tab body is usually not
+          // mounted yet and a plain notify would reach nobody. Parking first also
+          // survives an openTab that mounts the body synchronously — a body that
+          // mounts in the same tick consumes the parked intent itself.
+          for (const c of fresh) requestRevealTerminal(c.originSessionId)
           // m04040: a host-side connect names the session that asked for it.
           // Open that session's sidebar, not the one that happens to be on
           // screen — otherwise an agent connect pops the panel open over
@@ -1658,10 +1702,15 @@ function TerminalTab(): ReactElement {
 
 // ---- page shell -----------------------------------------------------------
 
-function OpsPage(): ReactElement {
+// The sidebar tab slot hands the body the session it belongs to (standardProps),
+// so the page reads its own id from here instead of the module global — the
+// global is only the slot's registration-time value, which is the session that
+// happened to be on screen then, not necessarily this one.
+function OpsPage(props: { sessionId?: string } = {}): ReactElement {
   const [tab, setTab] = useState<'devices' | 'terminal' | 'logs'>('devices')
   const [tokenMsg, setTokenMsg] = useState<string | null>(null)
   const [tokenInput, setTokenInput] = useState('')
+  const sessionId = typeof props.sessionId === 'string' && props.sessionId ? props.sessionId : panelSessionId
   useEffect(() => {
     setTokenNotice((reason) => setTokenMsg(reason))
     return () => setTokenNotice(null)
@@ -1671,8 +1720,14 @@ function OpsPage(): ReactElement {
   useEffect(() => onPendingConnect(() => setTab('terminal')), [])
   // A session opened by the agent (hillstone_open_terminal / run_and_analyze)
   // has to land the user on the terminal page too, otherwise the connect is
-  // invisible until they open the panel by hand.
-  useEffect(() => onRevealTerminal(() => setTab('terminal')), [])
+  // invisible until they open the panel by hand. The intent can arrive before
+  // this body exists (the poll opens the tab first), so the parked flag is
+  // consumed on mount — otherwise the panel opens on 设备管理 and the operator
+  // sees nothing happening on the device.
+  useEffect(() => {
+    if (takePendingReveal(sessionId)) setTab('terminal')
+    return onRevealTerminal(() => setTab('terminal'))
+  }, [sessionId])
   injectStyles()
   const TABS = { devices: '设备管理', terminal: '终端', logs: '日志' } as const
   return h('div', { className: 'ops-root', style: { padding: '16px 16px 0', color: 'var(--dsw-alias-label-primary, #e7e7ea)' } },
