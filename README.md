@@ -133,6 +133,34 @@ inside the host process. The copy button is **server-side**: the host copies the
 *ciphertext*, so duplicating a device never moves a plaintext password into the
 page, and editing a copy with an empty password field keeps the inherited one.
 
+Pressing 复制 does **not** create anything. It opens the 新增 dialog pre-filled
+from the source, and only 保存 writes the record — so 取消 really cancels, instead
+of leaving behind a `-副本` nobody asked for. The form is sent to the host as
+overrides, so a duplicate retargeted at a new address, account or device type is
+created with exactly what the operator typed, while every field they left alone
+still comes from the source (and an empty password box means "inherit", not
+"none").
+
+### The sidebar belongs to a session, not to the app
+
+When a connection comes up, the plugin opens its own right-sidebar tab. The trap
+is that DSH's right bar is **per session**: every `openTab` / `toggleExpanded` /
+`close` call resolves through `sessions.onScreen`, so it always lands on the
+conversation the user is currently looking at. An agent that connects to a
+device while you are reading a *different* conversation used to pop the terminal
+up there instead.
+
+So every connection carries the identity of whoever started it — `originSessionId`
+on the host side, taken from the tool's `exec.agent.id` or sent by the page — and
+the reveal is routed to that session: try the in-session `openTabIn` first (it
+does not move you), and only if that session has never had a right bar do we
+switch the main column to it with `uiWorkspace.openSession` and open the tab
+there. The switch publishes the on-screen session through a subscription, so the
+`openTab` has to wait for the next tick — doing it in the same tick re-creates
+the exact bug being fixed. Re-opening a tab that already exists only focuses it
+and never expands the column, hence the `isExpanded()` / `toggleExpanded()`
+fallback.
+
 ### A local API on a fixed port
 
 The browser half cannot call the host's services directly, so the host opens a

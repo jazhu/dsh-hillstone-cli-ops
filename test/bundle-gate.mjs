@@ -43,7 +43,10 @@ const checks = [
   // esbuild emits the bundle with `charset: ascii`, so CJK labels are escaped
   // to \uXXXX in the artefact and a literal-text check would always miss.
   // m02395 — 新增/编辑/复制 moved into one portalled dialog, 复制 back on the card.
-  ['client  copy issued from a device card', /duplicate\(|devices\/\$\{source\.id\}\/copy/, client],
+  // m04031 — 复制 no longer POSTs the moment it is pressed: it opens a pre-filled
+  // 新增 form and only 保存 creates the record, so 取消 really cancels.
+  ['client  copy is a pending form, not an immediate POST', /openCopy\(|copyFrom/, client],
+  ['client  copy is only persisted on save', /devices\/\$\{copyFrom\.id\}\/copy/, client],
   ['client  复制 label present', /\\u590D\\u5236|复制/, client],
   ['client  dialog portalled to document.body', /createPortal|react-dom/, client],
   ['client  dialog scrim', /\.ops-modal-scrim \{/, client],
@@ -82,7 +85,7 @@ const checks = [
   // injected `terminal length 0` is gone: the SG-6000 rejects it and paginates
   // anyway, so every session opened with a bogus device error on screen.
   ['host    send_input auto-submits a bare command', /looksLikeCommand/, host],
-  ['client  host-side connect opens the panel', /revealSidebar\(\)/, client],
+  ['client  host-side connect opens the panel', /revealSidebar = \(originSessionId\)|revealSidebar = \(originSessionId\)/, client],
   ['client  connect watch polls /conn', /REVEAL_POLL_MS/, client],
   // esbuild rewrites string quotes, so a literal `'terminal'` in the source is
   // `"terminal"` in the product — never pin the quote style in a grep.
@@ -97,7 +100,8 @@ const checks = [
   ['client  scrim does not swallow clicks', /\.ops-modal-scrim \{[^}]*pointer-events: none/, client],
   ['client  search box', /\.ops-search \{/, client],
   ['client  device list paginates', /\.ops-pager \{/, client],
-  ['client  device cards keep the 复制 action', /duplicate\(/, client],
+  ['client  device cards keep the 复制 action', /openCopy\(/, client],
+  ['client  the copy dialog says where it came from', /\\u590D\\u5236\\u81EA|复制自/, client],
   ['client  liveness badge', /LivenessBadge|ops-badge online|\\u7AEF\\u53E3\\u53EF\\u8FBE|端口可达/, client],
   // m03664 — the log transcript moved into the same dialog. Match the compiled
   // shape: esbuild rewrites `h(` into `(0, import_react.createElement)(`, so a
@@ -107,6 +111,20 @@ const checks = [
   ['host    liveness probe route', /devices\/ping/, host],
   ['host    TCP probe uses a socket', /net\.connect|node:net/, host],
   ['host    probe has a timeout', /PING_TIMEOUT_MS|setTimeout/, host],
+  // m04040 — the sidebar is per-session, and the host controller acts on
+  // whatever session is on screen, so an agent connect used to pop the panel
+  // open over an unrelated conversation. The connection now carries the
+  // session it belongs to, all the way from the tool call to the open.
+  ['host    a connection records its originating session', /originSessionId/, host],
+  ['host    the tool read the session off the run context', /exec\?\.agent\?\.id|exec\.agent\?\.id/, host],
+  ['client  the panel names its own session on connect', /panelSessionId/, client],
+  ['client  the reveal is told which session to open in', /revealSidebar\?\.\(c\.originSessionId\)|revealSidebar\?\.originSessionId|revealSidebar\?\.c\.originSessionId/, client],
+  ['client  an unadopted session falls back to opening that session', /openTabIn\(/, client],
+  ['client  a collapsed column is expanded too', /toggleExpanded\(\)/, client],
+  // The seat's on-screen session is published through a subscription, so it
+  // flips a microtask after openSession returns. Opening the tab in the same
+  // tick would aim at the session the user is leaving — the bug itself.
+  ['client  waits for the session switch to land', /setTimeout\(\(\) => \{/  , client],
 ]
 
 // Assert the ABSENCE directly: every check above greps dist/, so a removed
@@ -159,6 +177,13 @@ for (const [name, hit] of [
   // The log transcript used to auto-open on mount, and a dialog that opens by
   // itself is an interruption.
   ['client  log detail does not auto-open (m03664)', /if \(!activeId && logs\.length\) setActiveId/.test(clientSrc)],
+  // m04031 — 复制 used to be `const duplicate = async (source) => { POST /copy … }`
+  // fired on click, so 取消 left an orphan `-副本` nobody had asked for. Match the
+  // declarations, not the bare word: the comments deliberately still say
+  // "duplicate" when explaining that history, and a blanket /duplicate/ would
+  // fire on them and make this check useless.
+  ['client  复制 no longer POSTs on click (m04031)', /const duplicate = async|void duplicate\(/.test(clientSrc)],
+  ['client  bundle has no duplicate() call site (m04031)', /void duplicate\(|duplicate\(d\)/.test(client)],
 ]) {
   console.log(`${hit ? '  MISS' : '  ok  '} ${name}`)
   if (hit) bad++

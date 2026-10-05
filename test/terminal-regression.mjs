@@ -375,6 +375,31 @@ check('create never returns the password', typed.device && !('password' in typed
 const copied = await j(`/devices/${typed.device.id}/copy`, { method: 'POST', body: {} })
 check('copy returns a new device named <原名>-副本', copied.device?.id !== typed.device.id && copied.device?.name === 'probe-fw-副本', JSON.stringify(copied.device ?? copied).slice(0, 160))
 check('copy keeps deviceType + webPort', copied.device?.deviceType === 'web-application-firewall' && copied.device?.webPort === 8443)
+// m04031 — the client no longer POSTs the duplicate on click; it opens a
+// pre-filled form and saves. Those saves are overrides, so the route has to take
+// them: a copy renamed in the dialog must create under the typed name, and the
+// fields the form did not touch must still come from the source.
+const overrides = await j(`/devices/${typed.device.id}/copy`, {
+  method: 'POST',
+  body: { name: 'probe-fw-实验室副本', ip: '10.10.99.99', account: 'netops', port: 2222, deviceType: 'load-balancer', webPort: 8444, note: '覆盖测试' },
+})
+check('copy applies the overrides the form was filled with', overrides.device?.name === 'probe-fw-实验室副本' && overrides.device?.ip === '10.10.99.99' && overrides.device?.account === 'netops' && overrides.device?.port === 2222, JSON.stringify(overrides.device ?? overrides).slice(0, 200))
+check('copy applies overridden type + webPort + note', overrides.device?.deviceType === 'load-balancer' && overrides.device?.webPort === 8444 && overrides.device?.note === '覆盖测试', JSON.stringify(overrides.device ?? overrides).slice(0, 200))
+// …but an override the form left alone must not blank the field, and the source
+// must be untouched by any of it.
+const blanked = await j(`/devices/${typed.device.id}/copy`, { method: 'POST', body: { name: 'probe-fw-部分覆盖' } })
+check('a partial copy still inherits the untouched fields', blanked.device?.ip === typed.device.ip && blanked.device?.account === typed.device.account && blanked.device?.deviceType === 'web-application-firewall' && blanked.device?.webPort === 8443, JSON.stringify(blanked.device ?? blanked).slice(0, 200))
+const sourceStill = await j('/devices', { method: 'GET' })
+const sourceRow = (sourceStill.devices ?? []).find((x) => x.id === typed.device.id)
+check('copying never modifies the source device', sourceRow?.name === typed.device.name && sourceRow?.ip === typed.device.ip && sourceRow?.port === typed.device.port, JSON.stringify(sourceRow ?? {}).slice(0, 160))
+// A copy inherits the source password even when the body carries a plaintext one:
+// the route copies ciphertext, so a body password must not be silently ignored
+// into a *wrong* credential. Documents that it is ignored, and that the resulting
+// record still connects.
+const withPwd = await j(`/devices/${typed.device.id}/copy`, { method: 'POST', body: { name: 'probe-fw-带密码', password: 'a-different-password' } })
+const withPwdConn = await j('/connect', { method: 'POST', body: { deviceId: withPwd.device.id } })
+check('a body password cannot replace the copied credential', withPwdConn.ok && withPwdConn.connection?.status === 'ready', JSON.stringify(withPwdConn).slice(0, 160))
+if (withPwdConn.ok) await j('/disconnect', { method: 'POST', body: { connId: withPwdConn.connection.connId } })
 // A second copy of the same source must not collide on the name.
 const copied2 = await j(`/devices/${typed.device.id}/copy`, { method: 'POST', body: {} })
 check('a second copy gets a distinct name', copied2.device?.id !== copied.device?.id && copied2.device?.name !== copied.device?.name, copied2.device?.name)
@@ -399,6 +424,18 @@ if (renamedConn.ok) await j('/disconnect', { method: 'POST', body: { connId: ren
 
 const unknownType = await j(`/devices/${typed.device.id}`, { method: 'PUT', body: { deviceType: 'made-up-type' } })
 check('an unknown deviceType degrades to "other" instead of persisting garbage', unknownType.device?.deviceType === 'other', unknownType.device?.deviceType)
+
+// m04040: the panel posts its own session id with the connect request, so the
+// host-side watcher can reopen the sidebar in that conversation.
+const UI_SESSION = 'sess-regression-ui'
+const uiConn = await j('/connect', { method: 'POST', body: { deviceId, originSessionId: UI_SESSION } })
+check('a panel connect records the session it came from', uiConn.ok && uiConn.connection?.originSessionId === UI_SESSION, JSON.stringify(uiConn).slice(0, 200))
+const uiConnListed = (await j('/conn')).connections?.find((c) => c.connId === uiConn.connection?.connId)
+check('the origin session is visible in the connection list the client polls', uiConnListed?.originSessionId === UI_SESSION, JSON.stringify(uiConnListed).slice(0, 200))
+if (uiConn.ok) await j('/disconnect', { method: 'POST', body: { connId: uiConn.connection.connId } })
+const plainConn = await j('/connect', { method: 'POST', body: { deviceId } })
+check('a connect with no session does not invent one', plainConn.ok && !('originSessionId' in (plainConn.connection ?? {})), JSON.stringify(plainConn).slice(0, 200))
+if (plainConn.ok) await j('/disconnect', { method: 'POST', body: { connId: plainConn.connection.connId } })
 
 // 7. the session log records this connection. At this point the probe has
 //    driven: a 8KB paste, 16 keystrokes, a ^C, `flood`, a reattach and a
@@ -520,9 +557,25 @@ const devList = await registered.get('hillstone_list_devices').execute()
 check('list_devices returns devices without passwords', devList.ok && devList.devices.length > 0 && devList.devices.every((d) => !('password' in d)), JSON.stringify(devList.devices?.[0] ?? devList).slice(0, 160))
 
 // open_terminal is the agent's own way in: a pty that outlives the call.
-const opened = await registered.get('hillstone_open_terminal').execute({ deviceId })
+// The second argument is the tool run context, whose `agent` is the session the
+// call came from (m04040). The client needs it to open the right sidebar in the
+// right conversation, and it can only be read here.
+const ORIGIN_SESSION = 'sess-regression-0001'
+const opened = await registered
+  .get('hillstone_open_terminal')
+  .execute({ deviceId }, { agent: { id: ORIGIN_SESSION } })
 check('open_terminal opens a real pty session', opened.ok && opened.status === 'ready' && !!opened.connId, JSON.stringify(opened).slice(0, 200))
 const agentConn = opened.connId
+check('the connection remembers which DSH session asked for it', opened.originSessionId === ORIGIN_SESSION, `origin=${opened.originSessionId}`)
+
+const connList = (await j('/conn')).connections ?? []
+check('the connection list carries the origin session for the client watcher', connList.some((c) => c.connId === agentConn && c.originSessionId === ORIGIN_SESSION), JSON.stringify(connList.map((c) => [c.connId, c.originSessionId])).slice(0, 200))
+
+// A connect from outside the app (curl, a script) has no session, and must not
+// invent one — the field stays absent rather than becoming an empty string.
+const noOrigin = await registered.get('hillstone_open_terminal').execute({ deviceId })
+check('a connection opened without a session has no origin', noOrigin.ok && !('originSessionId' in noOrigin), JSON.stringify(noOrigin).slice(0, 200))
+await registered.get('hillstone_close_terminal').execute({ connId: noOrigin.connId })
 
 const sessionList = await registered.get('hillstone_list_sessions').execute()
 check('list_sessions reports the agent-opened session', sessionList.ok && sessionList.sessions.some((s) => s.connId === agentConn && s.status === 'ready'), JSON.stringify(sessionList.sessions?.map((s) => s.connId)).slice(0, 160))

@@ -256,6 +256,14 @@ interface SshSession {
   agentActive: boolean
   /** Pending terminal bytes not yet flushed to SSE clients (see `broadcast`). */
   dataBuf: string
+  /**
+   * DSH session that asked for this connection, when there was one (m04040).
+   *
+   * The client uses it to open the right sidebar in the caller's session
+   * rather than in whichever session happens to be on screen. Undefined for a
+   * connection opened from outside the app.
+   */
+  originSessionId?: string
   /** Coalescing timer for `dataBuf`; one SSE frame per tick, not per TCP chunk. */
   flushTimer?: ReturnType<typeof setTimeout>
   /** SSE keepalive timer, so an idle terminal is not reaped as a dead socket. */
@@ -482,6 +490,7 @@ function connectDevice(
   store: Store,
   deviceId: string,
   size?: { cols?: number; rows?: number },
+  originSessionId?: string,
 ): Promise<ConnectionInfo> {
   const device = store.devices.get(deviceId)
   if (!device) return Promise.reject(new Error('device not found'))
@@ -504,6 +513,7 @@ function connectDevice(
     rows: clamp(size?.rows ?? 40, 10, 300),
     agentActive: false,
     dataBuf: '',
+    ...originSessionId === undefined ? {} : { originSessionId },
     // Opened before the SSH handshake so an unreachable device, a bad password
     // and a refused port are all on record — a log that only records successes
     // is not an audit trail.
@@ -587,6 +597,7 @@ function connectDevice(
           deviceName: device.name,
           status: 'ready',
           createdAt: session.createdAt,
+          ...session.originSessionId === undefined ? {} : { originSessionId: session.originSessionId },
         })
       })
     })
@@ -1079,6 +1090,8 @@ async function handleApi(deps: ApiDeps, req: IncomingMessage, res: ServerRespons
         status: s.status,
         createdAt: s.createdAt,
         error: s.error,
+        // m04040: tells the client which session to reveal the sidebar in.
+        ...s.originSessionId === undefined ? {} : { originSessionId: s.originSessionId },
       }))
       writeJson(res, 200, { ok: true, connections: list, agentsBusy: busySessions() })
       return
@@ -1145,8 +1158,16 @@ async function handleApi(deps: ApiDeps, req: IncomingMessage, res: ServerRespons
     // POST /ops-api/devices/:id/copy  → duplicate a device, password included.
     // The ciphertext is copied server-side, so the plaintext secret never
     // travels to the browser and never has to be re-typed to make a backup copy
-    // of a device before changing it. Body may carry { name? } to override the
-    // default "<name>-副本".
+    // of a device before changing it.
+    //
+    // The body may carry field overrides ({ name?, ip?, account?, port?,
+    // webPort?, deviceType?, note? }). The client only asks for a copy when the
+    // operator presses 保存 in the pre-filled 新增 dialog, so by then they may
+    // have retargeted the duplicate at a different address — and the point of
+    // the whole flow is that whatever they typed is what gets created. A key
+    // that is absent keeps the source's value; `webPort: null` explicitly clears
+    // it, which is why every field is tested against `undefined` rather than
+    // against a falsy value.
     const copyMatch = pathname.match(/^\/devices\/([^/]+)\/copy$/)
     if (copyMatch) {
       const id = decodeURIComponent(copyMatch[1])
@@ -1155,7 +1176,7 @@ async function handleApi(deps: ApiDeps, req: IncomingMessage, res: ServerRespons
         writeJson(res, 404, { ok: false, error: { code: 'not-found', message: 'device not found' } })
         return
       }
-      const body = JSON.parse((await readBody(req)) || '{}') as { name?: string }
+      const body = JSON.parse((await readBody(req)) || '{}') as Partial<DeviceInput> & { name?: string }
       // A unique name matters here: two devices called 核心交换机 are
       // indistinguishable in the list, and the whole point of a copy is to have
       // a second entry to tell apart.
@@ -1169,8 +1190,18 @@ async function handleApi(deps: ApiDeps, req: IncomingMessage, res: ServerRespons
       const now = new Date().toISOString()
       const copy: Device = {
         ...source,
+        // The ciphertext comes along untouched: that is what makes the duplicate
+        // a working backup rather than a form clone, and it is the only reason
+        // `body.password` is ignored here — a copy never re-encrypts anything.
+        password: source.password,
         id: randomUUID(),
         name,
+        ip: body.ip ?? source.ip,
+        account: body.account ?? source.account,
+        port: body.port ?? source.port,
+        webPort: body.webPort === undefined ? source.webPort : body.webPort ?? undefined,
+        deviceType: body.deviceType === undefined ? source.deviceType : normalizeDeviceType(body.deviceType),
+        note: body.note === undefined ? source.note : body.note,
         createdAt: now,
         updatedAt: now,
       }
@@ -1179,12 +1210,16 @@ async function handleApi(deps: ApiDeps, req: IncomingMessage, res: ServerRespons
       writeJson(res, 201, { ok: true, device: toDTO(copy) })
       return
     }
-    // Connect to a device: body { deviceId, cols?, rows? }
+    // Connect to a device: body { deviceId, cols?, rows?, originSessionId? }
     if (pathname === '/connect') {
       const body = JSON.parse((await readBody(req)) || '{}') as {
         deviceId?: string
         cols?: number
         rows?: number
+        // m04040: the DSH session whose sidebar should open for this
+        // connection. Free text from the browser, so it is only carried —
+        // never trusted for anything, and never used to look up anything.
+        originSessionId?: string
       }
       if (!body.deviceId) {
         writeJson(res, 400, { ok: false, error: { code: 'bad-request', message: 'deviceId required' } })
@@ -1195,6 +1230,7 @@ async function handleApi(deps: ApiDeps, req: IncomingMessage, res: ServerRespons
           deps.store,
           body.deviceId,
           body.cols || body.rows ? { cols: body.cols ?? 120, rows: body.rows ?? 40 } : undefined,
+          body.originSessionId,
         )
         writeJson(res, 200, { ok: true, connection: info })
       } catch (e) {
@@ -1594,13 +1630,21 @@ function activate(ctx: ContextLike, config?: Partial<Config>): void {
                   `接下来：hillstone_send_input 发命令 → hillstone_get_output 带 since 读输出 → 用完 hillstone_close_terminal 关闭。`
                 )
               }),
-              async execute(args: { deviceId: string; cols?: number; rows?: number }) {
+              async execute(
+                args: { deviceId: string; cols?: number; rows?: number },
+                // m04040: the session the tool call came from. The client's
+                // connect watcher uses it to open the sidebar in that session
+                // instead of whichever session is on screen.
+                exec?: { agent?: { id?: string } },
+              ) {
                 if (!store.devices.get(args.deviceId)) return { ok: false, error: 'device not found' }
                 try {
-                  const conn = await connectDevice(store, args.deviceId, {
-                    cols: args.cols,
-                    rows: args.rows,
-                  })
+                  const conn = await connectDevice(
+                    store,
+                    args.deviceId,
+                    { cols: args.cols, rows: args.rows },
+                    typeof exec?.agent?.id === 'string' && exec.agent.id ? exec.agent.id : undefined,
+                  )
                   return { ok: true, ...conn }
                 } catch (e) {
                   return { ok: false, error: (e as Error).message }

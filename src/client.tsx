@@ -14,12 +14,12 @@
  * The tab body is a multi-tab surface:
  *   Tab 1 设备管理   — CRUD devices (name/ip/account/password/port/type/webPort);
  *                     each card connects, edits, copies or deletes. 新增 / 编辑 /
- *                     复制 all run in one centred dialog (DeviceDialog): the
- *                     right rail is too narrow to show a form and the list at
- *                     once, and a copy lands in the same dialog so the duplicate
- *                     can be renamed and saved in a single step. A copy
- *                     duplicates the encrypted password server-side, so it never
- *                     reaches the browser.
+ *                     复制 all run in one dialog (DeviceDialog): the right rail
+ *                     is too narrow to show a form and the list at once, and 复制
+ *                     lands there as a *pre-filled 新增 form* — it writes nothing
+ *                     until 保存, so 取消 really cancels. The host duplicates the
+ *                     encrypted password server-side, so it never reaches the
+ *                     browser and never has to be re-typed.
  *   Tab 2 终端       — one terminal tab per live connection; input is POSTed to
  *                     the host, device output streams back via SSE.
  *   Tab 3 日志       — the per-connection audit trail: who connected to which
@@ -158,7 +158,13 @@ async function requestConnect(deviceId: string, deviceName: string): Promise<voi
   pendingConnectResult = null
   pendingConnectError = null
   try {
-    const j = (await api<{ connection: ConnectionInfo }>('/connect', { method: 'POST', body: { deviceId } })) as any
+    const j = (await api<{ connection: ConnectionInfo }>('/connect', {
+      method: 'POST',
+      // m04040: name the session the connection belongs to, so the host's
+      // connect watcher can put the sidebar back in this conversation even if
+      // the user has moved to another one in the meantime.
+      body: panelSessionId ? { deviceId, originSessionId: panelSessionId } : { deviceId },
+    })) as any
     pendingConnectResult = j.connection as ConnectionInfo
   } catch (e) {
     pendingConnectError = `连接 ${deviceName} 失败：${(e as Error).message}`
@@ -191,8 +197,16 @@ function onPendingConnect(fn: () => void): () => void {
 // host-side connect used to be invisible until the user happened to open the
 // panel and look at the session list.
 const revealListeners = new Set<() => void>()
-let revealSidebar: (() => void) | null = null
+// Takes the session that asked for the connection, so the tab can open there
+// (m04040) instead of in whatever session happens to be on screen.
+let revealSidebar: ((originSessionId?: string) => void) | null = null
 let connectWatch: (() => void) | null = null
+
+// The DSH session this panel is rendered in. The right-sidebar tab slot is
+// scoped to one session, so the panel can name its own session and hand it to
+// the host with every connect request. Read by requestConnect below, which is a
+// plain module function with no access to props.
+let panelSessionId: string | null = null
 
 function onRevealTerminal(fn: () => void): () => void {
   revealListeners.add(fn)
@@ -237,7 +251,11 @@ function startConnectWatch(): void {
         for (const c of list) seenConnIds.add(c.connId)
         if (fresh.length) {
           for (const fn of [...revealListeners]) fn()
-          revealSidebar()
+          // m04040: a host-side connect names the session that asked for it.
+          // Open that session's sidebar, not the one that happens to be on
+          // screen — otherwise an agent connect pops the panel open over
+          // whatever conversation the user moved to in the meantime.
+          for (const c of fresh) revealSidebar?.(c.originSessionId)
         }
       } else if (!now) {
         prev = ''
@@ -632,10 +650,13 @@ const EMPTY_FORM: DeviceForm = {
 }
 
 /** A form pre-filled from a device. `password` stays blank: the host never
- *  sends it back, and an empty field means "keep the stored one". */
-function formFrom(d: DeviceDTO): DeviceForm {
+ *  sends it back, and an empty field means "keep the stored one" on PUT — or
+ *  "inherit the source's" on a copy, which the host does by duplicating the
+ *  ciphertext. `name` is overridable so a copy can start from a fresh name
+ *  instead of the source's. */
+function formFrom(d: DeviceDTO, name?: string): DeviceForm {
   return {
-    name: d.name,
+    name: name ?? d.name,
     ip: d.ip,
     account: d.account,
     password: '',
@@ -647,20 +668,43 @@ function formFrom(d: DeviceDTO): DeviceForm {
 }
 
 /**
- * 新增 / 编辑 device dialog.
+ * The name a copy will be created under, shown in the dialog before it exists.
+ *
+ * Mirrors the host's dedupe so the operator sees the real name they are about
+ * to save instead of a name the host would silently change on the way in. The
+ * host still dedupes — this is display, not an authority.
+ */
+function defaultCopyName(source: DeviceDTO, all: DeviceDTO[]): string {
+  const taken = new Set(all.map((d) => d.name))
+  const base = `${source.name}-副本`
+  if (!taken.has(base)) return base
+  let n = 2
+  while (taken.has(`${base} (${n})`)) n++
+  return `${base} (${n})`
+}
+
+/**
+ * 新增 / 编辑 device dialog, and the landing spot for 复制.
  *
  * The form used to be an inline card in the device list, but the right rail is
  * only a few hundred px wide: eight fields in two columns plus a footer left no
- * room to see the list being edited. A centred dialog also gives the 复制 flow
- * somewhere to land — a duplicate opens straight into this dialog with the copy
- * pre-selected, so renaming and saving is one step.
+ * room to see the list being edited. It also gives 复制 a natural home — 复制 used
+ * to POST the duplicate the instant the button was pressed and then open this
+ * dialog on the result, so pressing 取消 left an orphaned `-副本` behind that
+ * nobody had asked for. A copy is now a *pending* form: the dialog opens
+ * pre-filled, nothing is written until 保存, and the dialog says which device it
+ * was copied from.
  */
-function DeviceDialog({ editing, form, setForm, busy, notice, error, onSave, onClose }: {
+function DeviceDialog({ editing, copyFrom, form, setForm, busy, notice, error, onSave, onClose }: {
   editing: Partial<DeviceDTO>
+  /** Set when this dialog was opened by 复制: the device being duplicated. The
+   *  record does not exist yet — saving POSTs to that device's /copy with the
+   *  form as overrides, so the password is inherited server-side. */
+  copyFrom: DeviceDTO | null
   form: DeviceForm
   setForm: (f: DeviceForm) => void
   busy: boolean
-  /** Info shown inside the dialog (e.g. a fresh copy is ready to rename). */
+  /** Info shown inside the dialog (e.g. where a copy came from). */
   notice: string | null
   /** Validation / save failure. Lives in the dialog: a banner behind the scrim
    *  is invisible, which is exactly where a rejected save would be reported. */
@@ -670,8 +714,11 @@ function DeviceDialog({ editing, form, setForm, busy, notice, error, onSave, onC
 }): ReactElement {
   const isNew = !editing.id || editing.id === '__new__'
   const set = (patch: Partial<DeviceForm>) => setForm({ ...form, ...patch })
+  const title = copyFrom
+    ? `新增设备 · 复制自 ${copyFrom.name}`
+    : isNew ? '新增设备' : `编辑设备 · ${editing.name ?? ''}`
   return h(OpsModal, {
-    title: isNew ? '新增设备' : `编辑设备 · ${editing.name ?? ''}`,
+    title,
     onClose,
     foot: h(Fragment, null,
       h('button', { className: 'ops-btn primary', onClick: onSave, disabled: busy }, busy ? '保存中…' : '保存'),
@@ -692,7 +739,10 @@ function DeviceDialog({ editing, form, setForm, busy, notice, error, onSave, onC
           }, DEVICE_TYPES.map((t) => h('option', { key: t, value: t }, DEVICE_TYPE_LABELS[t]))),
         ),
         Field({ label: '账号', value: form.account, placeholder: 'admin', onChange: (e: any) => set({ account: e.target.value }) }),
-        Field({ label: '密码', hint: isNew ? '必填' : '留空表示不修改', type: 'password', value: form.password, onChange: (e: any) => set({ password: e.target.value }) }),
+        // On a copy the host duplicates the ciphertext, so an empty box means
+        // "same password as 核心交换机" rather than "no password" — worth spelling
+        // out, because on this dialog an empty box means the opposite in edit mode.
+        Field({ label: '密码', hint: copyFrom ? '留空继承原设备' : isNew ? '必填' : '留空表示不修改', type: 'password', value: form.password, onChange: (e: any) => set({ password: e.target.value }) }),
         Field({ label: 'SSH 端口', value: form.port, placeholder: '22', onChange: (e: any) => set({ port: e.target.value }) }),
         Field({ label: 'Web 端口', hint: '管理页面', value: form.webPort, placeholder: '443', onChange: (e: any) => set({ webPort: e.target.value }) }),
         Field({ label: '备注', value: form.note, placeholder: '可选', onChange: (e: any) => set({ note: e.target.value }) }),
@@ -715,6 +765,11 @@ function DeviceManager(): ReactElement {
   // m03664: the device awaiting delete confirmation, kept out of `editing` so an
   // edit dialog and a confirm dialog can never both be open.
   const [removing, setRemoving] = useState<DeviceDTO | null>(null)
+  // The device a pending 复制 is duplicating. The duplicate does not exist yet:
+  // opening the dialog must not write anything, so 保存 is what POSTs to that
+  // device's /copy. Distinct from `editing` because a copy is a *new* record
+  // whose id is not known until it is created.
+  const [copyFrom, setCopyFrom] = useState<DeviceDTO | null>(null)
   // Search + paging state (m03664). Kept in DeviceManager rather than the host
   // because the whole device list already arrives in one response; paging is a
   // view concern, and pushing it server-side would need it to reset whenever the
@@ -746,21 +801,46 @@ function DeviceManager(): ReactElement {
   const openCreate = () => {
     setEditing({ id: '__new__' })
     setForm({ ...EMPTY_FORM })
+    setCopyFrom(null)
     setFormNotice(null)
     setFormError(null)
   }
   const openEdit = (d: DeviceDTO) => {
     setEditing(d)
     setForm(formFrom(d))
+    setCopyFrom(null)
     setFormNotice(null)
     setFormError(null)
   }
-  const closeForm = () => setEditing(null)
+  /**
+   * 复制: open the 新增 dialog pre-filled from `source`, writing nothing yet.
+   *
+   * This used to POST the duplicate immediately and then open the dialog on the
+   * result. That made 取消 a lie — it discarded a form the operator thought they
+   * were dismissing, and left a `-副本` record behind that nothing referenced.
+   * Now the duplicate exists exactly when the operator presses 保存.
+   */
+  const openCopy = (source: DeviceDTO) => {
+    setEditing({ id: '__new__' })
+    setForm(formFrom(source, defaultCopyName(source, devices)))
+    setCopyFrom(source)
+    setFormNotice(`已复制「${source.name}」的信息，保存后创建新设备（密码继承原设备）`)
+    setFormError(null)
+  }
+  const closeForm = () => {
+    setEditing(null)
+    setCopyFrom(null)
+  }
 
   const save = async () => {
     const isNew = !editing?.id || editing.id === '__new__'
-    if (!form.name || !form.ip || !form.account || (isNew && !form.password)) {
-      setFormError('名称 / IP / 账号 / 密码（新建时必填）不能为空')
+    // A copy inherits the source password, so the only required fields are the
+    // ones the operator is expected to have a value for. Asking for a password
+    // here would defeat the point of a server-side copy.
+    if (!form.name || !form.ip || !form.account || (isNew && !copyFrom && !form.password)) {
+      setFormError(copyFrom
+        ? '名称 / IP / 账号 不能为空'
+        : '名称 / IP / 账号 / 密码（新建时必填）不能为空')
       return
     }
     setBusy(true)
@@ -777,50 +857,33 @@ function DeviceManager(): ReactElement {
         webPort: form.webPort.trim() ? Number(form.webPort) : null,
         note: form.note,
       }
-      if (isNew) {
+      if (copyFrom) {
+        // A copy is a create: the record does not exist until this POST lands.
+        // The form is sent as overrides so whatever the operator typed — a new
+        // name, a different IP, another device type — is what gets created, and
+        // the host carries the encrypted password over from the source.
+        // A typed password still wins, because the host is what decides: an
+        // override without `password` keeps the source's ciphertext.
+        const j = (await api<{ device?: DeviceDTO }>(`/devices/${copyFrom.id}/copy`, {
+          method: 'POST',
+          body: { ...payload, password: form.password || undefined },
+        })) as any
+        const created: DeviceDTO | undefined = j?.device
+        if (!created?.id || created.id === copyFrom.id) {
+          // Without a distinct id the host did not create a new record, so
+          // reporting success and refreshing would be a lie.
+          setFormError('复制失败：host 没有返回新设备，已放弃保存（没有写入任何记录）')
+          return
+        }
+        setMsg({ kind: 'ok', text: `已保存：新增「${created.name}」（含原设备密码）` })
+      } else if (isNew) {
         await api('/devices', { method: 'POST', body: { ...payload, password: form.password } })
+        setMsg({ kind: 'ok', text: '已保存' })
       } else {
         await api(`/devices/${editing!.id}`, { method: 'PUT', body: { ...payload, password: form.password || undefined } })
+        setMsg({ kind: 'ok', text: '已保存' })
       }
-      setMsg({ kind: 'ok', text: '已保存' })
       closeForm()
-      refresh()
-    } catch (e) {
-      setFormError((e as Error).message)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  /**
-   * Duplicate a device, then open the copy in the edit dialog.
-   *
-   * The host copies the encrypted password, so this is a genuine backup of the
-   * credentials and not just a form clone — the copy is connectable right away
-   * and the password never reaches the browser. 复制 sits on the card (m02395)
-   * because duplicating is a device-list operation; the dialog is where the
-   * result lands, since a duplicate almost always needs a different name (a
-   * second firewall of the same kind, a lab box) and hunting for a new card to
-   * rename it afterwards is the tedious part.
-   */
-  const duplicate = async (source: DeviceDTO) => {
-    setBusy(true)
-    setFormNotice(`正在复制 ${source.name}…`)
-    setFormError(null)
-    try {
-      const j = (await api(`/devices/${source.id}/copy`, { method: 'POST', body: {} })) as any
-      const copy: DeviceDTO | undefined = j?.device
-      if (!copy?.id || copy.id === source.id) {
-        // Without a distinct id, opening the dialog would make the next save PUT
-        // over the original device. Just report the copy and move on.
-        setFormNotice(null)
-        setMsg({ kind: 'ok', text: `已复制为「${source.name}-副本」（含密码，可直接连接）` })
-        refresh()
-        return
-      }
-      setEditing(copy)
-      setForm(formFrom(copy))
-      setFormNotice(`已复制为「${copy.name}」（含密码）——可直接改名后保存`)
       refresh()
     } catch (e) {
       setFormError((e as Error).message)
@@ -963,6 +1026,7 @@ function DeviceManager(): ReactElement {
     ),
     editing && h(DeviceDialog, {
       editing,
+      copyFrom,
       form,
       setForm,
       busy,
@@ -1022,10 +1086,9 @@ function DeviceManager(): ReactElement {
                     h('button', { className: 'ops-btn sm', onClick: () => openEdit(d) }, '编辑'),
                     h('button', {
                       className: 'ops-btn sm',
-                      onClick: () => void duplicate(d),
-                      disabled: busy,
-                      title: '复制该设备（含已保存的密码），并打开编辑页改名保存',
-                    }, busy ? '复制中…' : '复制'),
+                      onClick: () => openCopy(d),
+                      title: `以「${d.name}」的信息预填新增表单（含已保存的密码），点保存后才创建`,
+                    }, '复制'),
                     h('button', { className: 'ops-btn sm plain danger', onClick: () => setRemoving(d) }, '删除'),
                   ),
                 )
@@ -1640,7 +1703,7 @@ const IconComponent = () => h('svg', { viewBox: '0 0 24 24', width: 18, height: 
 )
 
 export const name = 'dsh-hillstone-cli-ops-client'
-export const inject = ['slots', 'sidebarRightTabs', 'sidebarRight']
+export const inject = ['slots', 'sidebarRightTabs', 'sidebarRight', 'uiWorkspace']
 
 const TAB_KIND = PANEL_ID // 'dsh-hillstone-cli-ops'
 
@@ -1670,7 +1733,14 @@ export function apply(ctx: any): void {
               {
                 name: 'sidebar.right.pane.tab',
                 key: TAB_KIND,
-                inject: () => ({ api: ctx }),
+                // m04040: the right-sidebar tab slot is scoped to one Session and
+                // hands its body the owning sessionId, which is the only place
+                // the panel can learn which conversation it belongs to. Remember
+                // it so requestConnect can name the origin.
+                inject: (sessionId: string) => {
+                  panelSessionId = typeof sessionId === 'string' ? sessionId : null
+                  return { api: ctx }
+                },
               },
               OpsPage,
             ),
@@ -1680,15 +1750,57 @@ export function apply(ctx: any): void {
         }
         // Publish the opener for the host-side connect bridge below, which can
         // only be built once sidebarRight has actually been injected.
-        revealSidebar = () => {
+        revealSidebar = (originSessionId?: string) => {
+          const openHere = (): void => {
+            const sr = ctx.sidebarRight
+            sr.openTab(TAB_KIND)
+            // Re-opening a tab that already exists only focuses it, so a
+            // deliberately collapsed column would stay collapsed.
+            if (!sr.isExpanded()) sr.toggleExpanded()
+          }
           try {
-            ctx.sidebarRight.openTab(TAB_KIND)
+            const sr = ctx.sidebarRight
+            // Preferred path: the controller can open a tab in ANY session, which
+            // puts the panel in the caller's conversation without pulling the
+            // user away from the one they are reading. It silently does nothing
+            // for a session the rightbar has never adopted, so verify afterwards
+            // rather than assume (m04040).
+            if (originSessionId && typeof sr.openTabIn === 'function') {
+              sr.openTabIn(originSessionId, TAB_KIND)
+              if ((sr.tabsIn?.(originSessionId) ?? []).some((t: any) => t.kind === TAB_KIND)) return
+              // Never adopted — the caller's conversation has no sidebar store
+              // yet, so the tab cannot be placed there directly. Fall through
+              // and bring that conversation on screen instead.
+              console.info('[dsh-hillstone-cli-ops] origin session has no sidebar yet; opening it')
+            }
+            const mounted = sr.mounted?.getSnapshot?.()
+            if (originSessionId && originSessionId !== mounted && typeof ctx.uiWorkspace?.openSession === 'function') {
+              ctx.uiWorkspace.openSession(originSessionId)
+              // openSession replaces the main reference, but the sidebar follows
+              // the seat's own "on screen" signal, which is published by a
+              // subscription and therefore lands a microtask later. Opening the
+              // tab in the same tick would still aim at the session the user is
+              // leaving — the exact bug this is meant to fix.
+              const mountedNow = sr.mounted?.getSnapshot?.()
+              if (originSessionId !== mountedNow) {
+                setTimeout(() => {
+                  try {
+                    openHere()
+                  } catch (error) {
+                    console.warn('[dsh-hillstone-cli-ops] openTab after session switch failed:', error)
+                  }
+                }, 0)
+                return
+              }
+            }
+            openHere()
           } catch (error) {
             console.warn('[dsh-hillstone-cli-ops] openTab failed:', error)
           }
         }
         return () => {
           if (revealSidebar) revealSidebar = null
+          panelSessionId = null
           // The watch is idempotent, so a re-registration must not leave the
           // old 4s interval running next to the new one.
           connectWatch?.()

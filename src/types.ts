@@ -86,6 +86,17 @@ export interface ConnectionInfo {
   createdAt: string
   /** Last error message, if status is 'error'. */
   error?: string
+  /**
+   * The DSH session that asked for this connection (m04040).
+   *
+   * The host's right sidebar is per-session: `ctx.sidebarRight.openTab` always
+   * acts on the session currently on screen, which is not necessarily the one
+   * that opened the connection. Carrying the caller's session id lets the
+   * client put the tab in the right place instead of wherever the user happens
+   * to be looking. Absent when the initiator is not a DSH session (a bare
+   * HTTP call from outside the app).
+   */
+  originSessionId?: string
 }
 
 /**
