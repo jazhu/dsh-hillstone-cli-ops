@@ -1,0 +1,4 @@
+# dsh-hillstone-cli-ops bundle patch.
+- insert:
+    - id: dsh-hillstone-cli-ops
+      name: dsh-hillstone-cli-ops

@@ -1,0 +1,29 @@
+# Dependencies — the host (DeepSeek Harness) provides react / react-dom at
+# runtime; everything else is installed by `pnpm install`.
+node_modules/
+
+# Build output. `pnpm run build` regenerates dist/index.mjs + dist/client.js
+# (and the .map files). Not committed: it is reproducible from src/ and weighs
+# ~1.9 MB, most of it the inlined xterm bundle.
+dist/
+
+# Local build / probe logs
+*.log
+*.log.*
+
+# Local data and scratch directories (device store, session logs, probes)
+data/
+data-*/
+!test/fixtures/
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Secrets — never commit a filled-in token or a device password
+.env
+.env.*
+!.env.example
