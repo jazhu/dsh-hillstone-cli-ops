@@ -88,6 +88,28 @@ export interface ConnectionInfo {
   error?: string
 }
 
+/**
+ * Liveness verdict for one device (m03664).
+ *
+ * `online` means the SSH port completed a TCP handshake. It says nothing about
+ * the account, the password, or whether the CLI answers — it answers exactly
+ * one question: is the box powered on and is the port reachable.
+ */
+export interface DeviceLiveness {
+  deviceId: string
+  ip: string
+  port: number
+  state: 'online' | 'offline' | 'probing'
+  /** TCP handshake round-trip time in ms. Absent when the probe failed. */
+  ms?: number
+  /** Why the probe failed: 'refused' | 'timeout' | 'unreachable' | … */
+  error?: string
+}
+
+export interface LivenessReport {
+  results: DeviceLiveness[]
+}
+
 /** Agent analysis request: run one or more commands and analyze the output. */
 export interface AnalyzeRequest {
   deviceId: string

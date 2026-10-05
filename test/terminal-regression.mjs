@@ -640,6 +640,36 @@ check('the shell is usable again after paging', recovered.ok && recovered.text.i
 check('the pager device never ate a character of a later command', !recovered.text?.includes('\ufffd'), JSON.stringify(recovered.text?.slice(-80)))
 registered.get('hillstone_close_terminal').execute({ connId: pagerConn })
 
+// 11. liveness probe. The device list's 检测存活 button asks the host, because a
+//     browser cannot open a raw TCP socket. Three verdicts have to come out right
+//     or the badge lies: the fake SSH server is online, a closed port on loopback
+//     is refused, and the result must name every device — a probe that silently
+//     dropped one device would show it with no badge at all.
+const deadPort = await freePort()
+const deadDevice = await j('/devices', {
+  method: 'POST',
+  body: { name: 'probe-dead', ip: '127.0.0.1', port: deadPort, account: 'probe', password: PASSWORD },
+})
+const ping = await j('/devices/ping', { method: 'POST', body: {} })
+const pingResults = ping.results || []
+const byId = Object.fromEntries(pingResults.map((r) => [r.deviceId, r]))
+check('the liveness probe answers for every device', pingResults.length === (await j('/devices')).devices.length, `got=${pingResults.length}`)
+check('a listening SSH port reads as online, with a timing', byId[deviceId]?.state === 'online' && typeof byId[deviceId]?.ms === 'number', JSON.stringify(byId[deviceId] || null))
+check('a closed port reads as offline with a reason', byId[deadDevice.device.id]?.state === 'offline' && !!byId[deadDevice.device.id]?.error, JSON.stringify(byId[deadDevice.device.id] || null))
+check('the probe never reports a port it was not given', pingResults.every((r) => r.port > 0 && !!r.deviceId), JSON.stringify(pingResults.slice(0, 2)))
+// A probe must not be an SSH login: it would burn auth attempts and would
+// report "offline" for a box that is up but has a full password policy.
+check('the probe needs no password to reach a verdict', await (async () => {
+  const noPass = await j('/devices', {
+    method: 'POST',
+    body: { name: 'probe-nopass', ip: '127.0.0.1', port: sshPort, account: 'probe', password: PASSWORD },
+  })
+  const again = await j('/devices/ping', { method: 'POST', body: {} })
+  const r = (again.results || []).find((x) => x.deviceId === noPass.device.id)
+  return r?.state === 'online' && !('password' in r)
+})(), 'a device with a stored password probed without touching it')
+await j(`/devices/${deadDevice.device.id}`, { method: 'DELETE' })
+
 console.log(`\n${pass} passed, ${fail} failed`)
 sshServer.close()
 process.exit(fail ? 1 : 0)

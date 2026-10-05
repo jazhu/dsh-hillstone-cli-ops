@@ -32,6 +32,7 @@ import {
 } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import net from 'node:net'
 import type { Client as SshClient } from 'ssh2'
 
 // ssh2 is externalized in the host build, so it resolves from node_modules.
@@ -41,6 +42,7 @@ import type {
   Device,
   DeviceDTO,
   DeviceInput,
+  DeviceLiveness,
   ConnectionInfo,
   AnalyzeRequest,
   AnalyzeResponse,
@@ -400,6 +402,58 @@ function busySessions(): string[] {
   const out: string[] = []
   for (const s of sessions.values()) if (s.agentActive) out.push(s.connId)
   return out
+}
+
+/**
+ * TCP reachability probe for one device's SSH port (m03664).
+ *
+ * Deliberately a bare TCP handshake, not an SSH connection: the question the
+ * device list asks is "is this box up and is the port open", and a real SSH
+ * handshake would also be slow and would burn auth attempts on boxes that are
+ * up but misconfigured. It resolves for every outcome — nothing here throws —
+ * because one unreachable device must not abort the report for the other 19.
+ *
+ * The 3s ceiling matters: a filtered port usually blackholes the SYN, so without
+ * a timeout the scan of 20 devices would hang for the OS default (minutes).
+ */
+const PING_TIMEOUT_MS = 3000
+function probeTcp(ip: string, port: number): Promise<{ ms?: number; error?: string }> {
+  return new Promise((resolve) => {
+    const started = Date.now()
+    let settled = false
+    const done = (r: { ms?: number; error?: string }) => {
+      if (settled) return
+      settled = true
+      try { socket.destroy() } catch { /* ignore */ }
+      resolve(r)
+    }
+    const socket = net.connect({ host: ip, port })
+    socket.setTimeout(PING_TIMEOUT_MS)
+    socket.once('connect', () => done({ ms: Date.now() - started }))
+    // The three failure modes read very differently to an operator, so keep
+    // them apart: 'refused' means the host is up with nothing listening (a real
+    // misconfiguration), 'timeout' means something dropped the packet (a
+    // firewall), and DNS/unreachable means the address itself is wrong.
+    socket.once('error', (err: NodeJS.ErrnoException) => {
+      done({ error: err.code === 'ECONNREFUSED' ? 'refused' : err.code === 'ETIMEDOUT' ? 'timeout' : (err.code || err.message) })
+    })
+    socket.once('timeout', () => done({ error: 'timeout' }))
+  })
+}
+
+/** Probe every device concurrently and return one verdict per device. */
+async function scanLiveness(list: Device[]): Promise<DeviceLiveness[]> {
+  return Promise.all(list.map(async (d): Promise<DeviceLiveness> => {
+    const r = await probeTcp(d.ip, d.port)
+    return {
+      deviceId: d.id,
+      ip: d.ip,
+      port: d.port,
+      state: r.ms === undefined ? 'offline' : 'online',
+      ...(r.ms !== undefined ? { ms: r.ms } : {}),
+      ...(r.error ? { error: r.error } : {}),
+    }
+  }))
 }
 
 /** Append device output to the session log and fan it out to SSE clients. */
@@ -1078,6 +1132,14 @@ async function handleApi(deps: ApiDeps, req: IncomingMessage, res: ServerRespons
       deps.store.devices.set(device.id, device)
       persistStore(deps.store)
       writeJson(res, 201, { ok: true, device: toDTO(device) })
+      return
+    }
+    // POST /ops-api/devices/ping  → TCP reachability for every device (m03664).
+    // Lives inside the POST block, before the /devices/:id routes: the 404
+    // fallthrough at the end of the block would otherwise swallow it.
+    if (pathname === '/devices/ping') {
+      const results = await scanLiveness([...deps.store.devices.values()])
+      writeJson(res, 200, { ok: true, results })
       return
     }
     // POST /ops-api/devices/:id/copy  → duplicate a device, password included.

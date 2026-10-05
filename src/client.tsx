@@ -50,7 +50,7 @@ import { FitAddon } from 'xterm-addon-fit'
 // into <head> at runtime, because the harness does not expose xterm as a resolvable
 // client module and we cannot rely on a separately-served stylesheet asset.
 import xtermCss from 'xterm/css/xterm.css'
-import type { DeviceDTO, ConnectionInfo, DeviceType, LogEntry, SessionLog, SessionLogDetail } from './types.ts'
+import type { DeviceDTO, ConnectionInfo, DeviceType, DeviceLiveness, LogEntry, SessionLog, SessionLogDetail } from './types.ts'
 import { DEVICE_TYPES, DEVICE_TYPE_LABELS } from './types.ts'
 
 // Inject xterm's stylesheet exactly once so the terminal renders correctly.
@@ -300,19 +300,59 @@ const panelCss = `
 .ops-input:focus { border-color: var(--dsw-alias-state-business-primary, #4176e6); background: var(--dsw-alias-bg-layer-1, #1e1f23); }
 .ops-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
 
-/* Device dialog (新增 / 编辑 / 复制). The right rail is only a few hundred px
-   wide, so an inline form and the device list cannot share it; every device
-   edit happens in a centred dialog instead. OpsModal portals it to <body>,
-   because the rail renders inside a low z-index stacking context and a fixed
-   overlay painted in place would slip under the host's own chrome. */
-.ops-modal-scrim { position: fixed; inset: 0; z-index: 1100; display: flex; align-items: center; justify-content: center; padding: 24px; box-sizing: border-box; background: var(--dsw-alias-bg-mask-2, #0003); backdrop-filter: var(--dsw-menu-backdrop-filter, blur(40px) saturate(150%)); -webkit-backdrop-filter: var(--dsw-menu-backdrop-filter, blur(40px) saturate(150%)); animation: ops-modal-in .12s var(--ds-ease-in-out, ease); }
-.ops-modal { width: min(520px, 100%); max-height: min(88vh, 780px); display: flex; flex-direction: column; box-sizing: border-box; border: 1px solid var(--dsw-alias-border-l2, #2a2a36); border-radius: var(--dsw-radius-lg, 16px); background: var(--dsw-alias-bg-layer-1, #232324); box-shadow: var(--dsw-shadow-lv3, 0 0 1px 0 #0003, 0 0 4px 0 #00000005, 0 12px 32px 0 #00000014); overflow: hidden; }
+/* Device dialog (新增 / 编辑 / 复制 / 删除确认 / 日志明细).
+   The right rail is only a few hundred px wide, so an inline form and the device
+   list cannot share it; every device edit happens in a dialog instead. OpsModal
+   portals it to <body>, because the rail renders inside a low z-index stacking
+   context and a fixed overlay painted in place would slip under the host's own
+   chrome.
+
+   The card is anchored to the RIGHT edge and the scrim is deliberately almost
+   transparent (m03664). Two earlier attempts hurt: a full-viewport centred
+   overlay made the dialog feel like a system modal taking over the whole app,
+   and a 40px background blur behind the scrim — copied from the host's own menu
+   styling — smeared the entire conversation into an unreadable wash. An ops
+   dialog is context, not a takeover: the main UI stays legible and clickable
+   underneath, and the card sits next to the panel that opened it so the eye does
+   not have to travel. Clicks on the app behind still reach the app. */
+.ops-modal-scrim { position: fixed; inset: 0; z-index: 1100; display: flex; align-items: center; justify-content: flex-end; padding: 32px 32px 32px 8px; box-sizing: border-box; background: var(--dsw-alias-bg-mask-2, #00000008); pointer-events: none; }
+.ops-modal-scrim > .ops-modal { pointer-events: auto; }
+.ops-modal { width: min(480px, 100%); max-height: min(84vh, 760px); display: flex; flex-direction: column; box-sizing: border-box; border: 1px solid var(--dsw-alias-border-l2, #2a2a36); border-radius: var(--dsw-radius-lg, 16px); background: var(--dsw-alias-bg-layer-1, #232324); box-shadow: var(--dsw-shadow-lv4, 0 0 1px 0 #0000001a, 0 16px 48px 0 #00000033); overflow: hidden; animation: ops-modal-in .12s var(--ds-ease-in-out, ease); }
 .ops-modal-head { display: flex; align-items: center; gap: 8px; padding: 13px 16px; border-bottom: .5px solid var(--dsw-alias-border-l1, #ffffff0f); }
 .ops-modal-head b { font-size: 14px; line-height: 22px; font-weight: 600; color: var(--dsw-alias-label-primary, #f9fafb); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ops-modal-close { margin-left: auto; width: 26px; height: 26px; padding: 0; font-size: 13px; line-height: 1; }
 .ops-modal-body { padding: 14px 16px 2px; overflow: auto; }
 .ops-modal-foot { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: .5px solid var(--dsw-alias-border-l1, #ffffff0f); background: var(--dsw-alias-bg-layer-2, #2c2c2e); }
 @keyframes ops-modal-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* Confirm dialog (delete). The device being removed is the only thing the user
+   must check, so it is shown as a labelled fact list rather than prose: a
+   paraphrase in a sentence is what people skim past. */
+.ops-confirm-target { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; padding: 10px 12px; border: 1px solid var(--dsw-alias-border-l2, #2a2a36); border-radius: var(--dsw-radius-sm, 8px); background: var(--dsw-alias-bg-layer-2, #1e1f23); }
+.ops-confirm-target div { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.ops-confirm-target span { flex: none; width: 52px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary, #9a9aa6); }
+.ops-confirm-target b { flex: 1; min-width: 0; font-size: 13px; line-height: 20px; font-weight: 500; color: var(--dsw-alias-label-primary, #f9fafb); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ops-confirm-warn { font-size: 12.5px; line-height: 20px; color: var(--dsw-alias-state-error-primary, #f85149); }
+
+/* Device list search + pagination. The rail shows ~20 cards comfortably; past
+   that, scrolling becomes the only way to reach a device and the cards are tall
+   enough that the target is off-screen most of the time. */
+.ops-toolbar { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
+.ops-search { flex: 1; min-width: 0; position: relative; display: flex; align-items: center; }
+.ops-search .ops-input { padding-left: 26px; }
+.ops-search-mark { position: absolute; left: 8px; font-size: 12px; line-height: 1; color: var(--dsw-alias-label-caption, #81858c); pointer-events: none; }
+.ops-search-clear { position: absolute; right: 6px; width: 20px; height: 20px; padding: 0; border: none; background: transparent; color: var(--dsw-alias-label-tertiary, #9a9aa6); cursor: pointer; font-size: 12px; line-height: 1; border-radius: var(--dsw-radius-xs, 4px); }
+.ops-search-clear:hover { background: var(--dsw-alias-interactive-bg-hover, #ffffff14); color: var(--dsw-alias-label-primary, #f9fafb); }
+.ops-pager { display: flex; align-items: center; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: .5px solid var(--dsw-alias-border-l2, #2a2a36); }
+.ops-pager-info { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary, #9a9aa6); font-variant-numeric: tabular-nums; }
+.ops-pager-acts { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+
+/* Liveness badge. Distinct from the connection StatusBadge: this one is a TCP
+   reachability verdict from a port scan, which says nothing about whether SSH
+   will actually accept the account. */
+.ops-badge.online { color: var(--dsw-alias-state-success-primary, #22c55e); background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #22c55e) 14%, transparent); }
+.ops-badge.offline { color: var(--dsw-alias-state-error-primary, #f85149); background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f85149) 14%, transparent); }
+.ops-badge.probing { color: var(--dsw-alias-label-tertiary, #9a9aa6); background: color-mix(in srgb, var(--dsw-alias-label-tertiary, #9a9aa6) 14%, transparent); }
 
 /* Device cards — a table forced a 6-column squeeze into a narrow right rail;
    stacked cards keep the identity readable and the actions thumb-reachable. */
@@ -368,14 +408,14 @@ const panelCss = `
 .ops-conns { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
 .ops-conns-label { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary, #9a9aa6); margin-right: 2px; }
 
-/* Session log. Two columns: the session list on the left, one session's
-   entries on the right. Stacked instead, because the right rail has no room
-   for a list and a transcript to read at the same time. */
+/* Session log. A single column of sessions; the transcript opens in a dialog
+   (m03664), because two columns in a ~400px rail squeezed both — the session
+   names truncated to unreadable slivers and the transcript got the leftovers. */
 .ops-logs { display: flex; flex-direction: column; gap: 10px; }
 .ops-log-list { display: flex; flex-direction: column; gap: 6px; }
+.ops-log-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ops-log-row { display: block; width: 100%; text-align: left; font-family: inherit; cursor: pointer; border: 1px solid var(--dsw-alias-border-l2, #2a2a36); border-radius: var(--dsw-radius-sm, 8px); background: var(--dsw-alias-bg-layer-2, #1e1f23); padding: 8px 11px; color: inherit; transition: border-color var(--ds-transition-duration-fast, .1s) var(--ds-ease-in-out, ease); }
 .ops-log-row:hover { border-color: var(--dsw-alias-border-l4, #4a4d55); }
-.ops-log-row.on { border-color: var(--dsw-alias-state-business-primary, #4176e6); background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 8%, var(--dsw-alias-bg-layer-2, #1e1f23)); }
 .ops-log-row-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .ops-log-row-top b { font-size: 13px; line-height: 20px; font-weight: 500; color: var(--dsw-alias-label-primary, #f9fafb); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ops-log-row-meta { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-top: 4px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary, #9a9aa6); }
@@ -385,6 +425,9 @@ const panelCss = `
 .ops-log-detail-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13.5px; }
 .ops-log-detail-head b { font-weight: 500; color: var(--dsw-alias-label-primary, #f9fafb); }
 .ops-log-detail-head code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; color: var(--dsw-alias-label-caption, #81858c); }
+/* Inside a dialog the detail sits on the dialog's own surface, so it drops its
+   frame and padding: a panel-in-a-panel is noise. */
+.ops-modal .ops-log-detail { border: none; border-radius: 0; background: none; padding: 0; }
 .ops-log-detail-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 6px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary, #9a9aa6); }
 .ops-log-detail-acts { margin-top: 8px; }
 .ops-log-entries { margin-top: 8px; border-top: .5px solid var(--dsw-alias-border-l2, #2a2a36); }
@@ -441,22 +484,87 @@ function Field({ label, hint, ...rest }: { label: string; hint?: string } & Reco
   )
 }
 
+/** Devices per page in the device list (m03664). */
+const PAGE_SIZE = 20
+
+// DeviceLiveness is shared with the host so the probe endpoint's response shape
+// and the card badge cannot drift apart. `online` means the SSH port completed a
+// TCP handshake — it says nothing about the account or the password, which is
+// why the badge says 端口可达 rather than 在线 and repeats the caveat in its
+// tooltip.
+const LIVENESS_TEXT: Record<string, string> = { online: '端口可达', offline: '端口不可达', probing: '检测中' }
+const LIVENESS_TITLE: Record<string, string> = {
+  online: 'TCP 握手成功：这台设备的 SSH 端口在监听，账号密码尚未校验。',
+  offline: 'TCP 握手失败：设备关机、IP 不通，或被防火墙拦截了 SSH 端口。',
+  probing: '正在做 TCP 连接测试…',
+}
+
+function LivenessBadge({ liveness, port }: { liveness: DeviceLiveness; port: number }): ReactElement {
+  const cls = liveness.state === 'online' ? 'online' : liveness.state === 'offline' ? 'offline' : 'probing'
+  const detail = liveness.state === 'online' && liveness.ms !== undefined
+    ? `${LIVENESS_TEXT[cls]}（${liveness.ms}ms）`
+    : LIVENESS_TEXT[cls]
+  return h('span', {
+    className: 'ops-badge ' + cls,
+    // The error is the actionable part of a failed probe (refused vs timeout vs
+    // unreachable), so it goes in the tooltip rather than being flattened away.
+    title: [LIVENESS_TITLE[cls], `SSH ${liveness.ip}:${port ?? liveness.port}`, liveness.error].filter(Boolean).join('\n'),
+  },
+    h('b', null),
+    detail,
+  )
+}
+
 /**
- * Centred dialog, portalled to <body>.
+ * Anchored dialog, portalled to <body>.
  *
  * The panel is mounted in the right rail, whose subtree sits in a low z-index
  * stacking context, so a `position: fixed` scrim rendered in place is clipped
  * behind the host's own chrome. Portalling to the document root puts the dialog
  * above it; the fallback keeps the dialog usable if createPortal is unavailable.
+ *
+ * The scrim is click-through (m03664): the app stays visible AND interactive
+ * underneath, so a click outside the card both reaches the app and dismisses
+ * this dialog. That makes the dialog transient by design — the operator who
+ * wants to keep a half-filled form while checking something in the chat has to
+ * close it deliberately instead. Pressing Escape always closes, and a click or
+ * drag that *started* inside the card never counts as a click-away, so releasing
+ * a text selection past the card's edge does not throw away the form.
  */
-const MODAL_Z = 1100
 function OpsModal({ title, onClose, foot, children }: {
   title: ReactNode
   onClose: () => void
   foot?: ReactNode
   children?: ReactNode
 }): ReactElement {
-  const panel = h('div', { className: 'ops-modal', role: 'dialog', 'aria-modal': true, 'aria-label': typeof title === 'string' ? title : undefined },
+  // Track where the press started, not where it ended: a mousedown on the card
+  // followed by a mouseup over the app is a drag or a selection, not a dismissal.
+  const downInside = useRef(false)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation()
+        onClose()
+      }
+    }
+    const onDown = (e: MouseEvent) => {
+      downInside.current = !!e.target && !!(e.target as HTMLElement).closest?.('.ops-modal')
+    }
+    const onClick = (e: MouseEvent) => {
+      if (downInside.current) return
+      if (!(e.target as HTMLElement)?.closest?.('.ops-modal')) onClose()
+    }
+    document.addEventListener('keydown', onKey, true)
+    document.addEventListener('mousedown', onDown, true)
+    document.addEventListener('click', onClick, true)
+    return () => {
+      document.removeEventListener('keydown', onKey, true)
+      document.removeEventListener('mousedown', onDown, true)
+      document.removeEventListener('click', onClick, true)
+    }
+  }, [onClose])
+
+  const panel = h('div', { className: 'ops-modal', role: 'dialog', 'aria-modal': false, 'aria-label': typeof title === 'string' ? title : undefined },
     h('div', { className: 'ops-modal-head' },
       h('b', null, title),
       h('button', { className: 'ops-btn plain ops-modal-close', onClick: onClose, 'aria-label': '关闭', title: '关闭' }, '✕'),
@@ -464,10 +572,38 @@ function OpsModal({ title, onClose, foot, children }: {
     h('div', { className: 'ops-modal-body' }, children),
     foot ? h('div', { className: 'ops-modal-foot' }, foot) : null,
   )
-  // Clicking the scrim (not the panel) dismisses; a click inside must not.
-  const scrim = h('div', { className: 'ops-modal-scrim', onClick: (e: any) => { if (e.target === e.currentTarget) onClose() } }, panel)
+  const scrim = h('div', { className: 'ops-modal-scrim' }, panel)
   if (typeof document !== 'undefined' && typeof createPortal === 'function') return createPortal(scrim, document.body)
   return scrim
+}
+
+/**
+ * Confirmation dialog, in the same language as the edit dialog (m03664).
+ *
+ * `window.confirm` was doing this job before, and it is wrong here for two
+ * reasons: it is a system dialog that blocks the whole app — the exact "covers
+ * the entire application" complaint this change set is fixing — and it cannot
+ * show the device name and IP that a mis-click needs. The button says what it
+ * does rather than 确认, because a confirmation whose action is unlabelled is
+ * the thing people click through.
+ */
+function ConfirmDialog({ title, lines, warning, confirmText, onConfirm, onClose }: {
+  title: ReactNode
+  lines: { label: string; value: ReactNode }[]
+  warning?: ReactNode
+  confirmText: string
+  onConfirm: () => void
+  onClose: () => void
+}): ReactElement {
+  return h(OpsModal, { title, onClose, foot: h(Fragment, null,
+    h('button', { className: 'ops-btn danger', onClick: onConfirm, autoFocus: true }, confirmText),
+    h('button', { className: 'ops-btn plain', onClick: onClose }, '取消'),
+  ) },
+    h('div', { className: 'ops-confirm-target' },
+      lines.map((l, i) => h('div', { key: i }, h('span', null, l.label), h('b', { title: typeof l.value === 'string' ? l.value : undefined }, l.value))),
+    ),
+    warning ? h('div', { className: 'ops-confirm-warn' }, warning) : null,
+  )
 }
 
 // ---- device management tab ------------------------------------------------
@@ -576,6 +712,20 @@ function DeviceManager(): ReactElement {
   const [formError, setFormError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  // m03664: the device awaiting delete confirmation, kept out of `editing` so an
+  // edit dialog and a confirm dialog can never both be open.
+  const [removing, setRemoving] = useState<DeviceDTO | null>(null)
+  // Search + paging state (m03664). Kept in DeviceManager rather than the host
+  // because the whole device list already arrives in one response; paging is a
+  // view concern, and pushing it server-side would need it to reset whenever the
+  // list is refreshed underneath the user.
+  const [query, setQuery] = useState('')
+  const [page, setPage] = useState(1)
+  // Liveness verdicts from the manual TCP scan, keyed by device id. Not device
+  // state: a device that was renamed or deleted must not keep a stale verdict,
+  // so this map is pruned against the current list on every render of the list.
+  const [liveness, setLiveness] = useState<Record<string, DeviceLiveness>>({})
+  const [probing, setProbing] = useState(false)
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -679,10 +829,14 @@ function DeviceManager(): ReactElement {
     }
   }
   const remove = async (id: string) => {
-    if (!confirm('确认删除该设备？')) return
+    // `window.confirm` is gone (m03664): a system dialog blocks and covers the
+    // whole app, and it cannot show the operator which device is about to go.
+    // The dialog names the device, and the button says 删除 rather than 确认.
     setBusy(true)
     try {
       await api(`/devices/${id}`, { method: 'DELETE' })
+      setRemoving(null)
+      setMsg({ kind: 'ok', text: `已删除「${devices.find((d) => d.id === id)?.name ?? '设备'}」` })
       refresh()
     } catch (e) {
       setMsg({ kind: 'err', text: (e as Error).message })
@@ -707,18 +861,106 @@ function DeviceManager(): ReactElement {
     }
   }
 
+  /**
+   * Manual liveness scan (m03664).
+   *
+   * The browser cannot open a raw TCP socket, so this asks the host, which owns
+   * the loopback API anyway. Deliberately manual: a page that probes on a timer
+   * would emit network traffic to every device on the list forever, and a firewall
+   * with a scan-detection policy would start dropping the operator's own SSH
+   * sessions. One press, one burst, then a verdict per card.
+   */
+  const scanLiveness = async () => {
+    if (probing) return
+    setProbing(true)
+    // Mark every device in the visible list as probing first, so a 20-device
+    // list does not sit blank for the length of the slowest timeout.
+    setLiveness((prev) => {
+      const next = { ...prev }
+      for (const d of devices) next[d.id] = { deviceId: d.id, ip: d.ip, port: d.port, state: 'probing' }
+      return next
+    })
+    try {
+      const j = (await api<{ results: DeviceLiveness[] }>('/devices/ping', { method: 'POST', body: {} })) as any
+      const results = (j.results || []) as DeviceLiveness[]
+      setLiveness((prev) => {
+        const next = { ...prev }
+        for (const r of results) next[r.deviceId] = r
+        return next
+      })
+      const up = results.filter((r) => r.state === 'online').length
+      setMsg({
+        kind: 'ok',
+        text: results.length
+          ? `存活检测：${up}/${results.length} 台 SSH 端口可达`
+          : '没有可检测的设备',
+      })
+    } catch (e) {
+      setMsg({ kind: 'err', text: (e as Error).message })
+    } finally {
+      setProbing(false)
+    }
+  }
+
+  // ---- search + paging ----------------------------------------------------
+  // Filtered on name / IP / account / type / note, case-insensitively. Each term
+  // must match somewhere: splitting on whitespace makes "core 10.1" work, which
+  // a plain substring test would miss.
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  const filtered = devices.filter((d) => {
+    if (!terms.length) return true
+    const hay = [d.name, d.ip, d.account, d.note, DEVICE_TYPE_LABELS[d.deviceType ?? 'other']]
+      .filter(Boolean).join(' ').toLowerCase()
+    return terms.every((t) => hay.includes(t))
+  })
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  // Clamp instead of resetting: deleting the last row of the last page should
+  // land on the previous page, not on an empty one.
+  const currentPage = Math.min(page, totalPages)
+  const pageItems = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
+  // Prune verdicts for devices that no longer exist, so a deleted device does
+  // not keep a badge alive in the map forever.
+  const knownIds = new Set(devices.map((d) => d.id))
+  const liveLiveness = Object.fromEntries(Object.entries(liveness).filter(([id]) => knownIds.has(id)))
+
   return h(Fragment, null,
     h('div', { className: 'ops-head' },
       h('div', null,
         h('h2', { className: 'ops-title' }, '设备管理'),
-        h('div', { className: 'ops-sub' }, `共 ${devices.length} 台设备`),
+        h('div', { className: 'ops-sub' },
+          filtered.length === devices.length
+            ? `共 ${devices.length} 台设备`
+            : `匹配 ${filtered.length} / ${devices.length} 台设备`),
       ),
       h('div', { className: 'ops-head-right' },
+        h('button', {
+          className: 'ops-btn',
+          onClick: () => void scanLiveness(),
+          disabled: probing || devices.length === 0,
+          title: '对每台设备的 SSH 端口做一次 TCP 连接测试（不建立 SSH 会话）',
+        }, probing ? '检测中…' : '检测存活'),
         h('button', { className: 'ops-btn', onClick: () => void refresh(), disabled: loading }, '刷新'),
         h('button', { className: 'ops-btn primary', onClick: openCreate, disabled: busy }, '+ 新增设备'),
       ),
     ),
     msg && h('div', { className: 'ops-msg ' + (msg.kind === 'ok' ? 'ok' : 'err') }, h('code', null, msg.text)),
+    devices.length > 0 && h('div', { className: 'ops-toolbar' },
+      h('div', { className: 'ops-search' },
+        h('span', { className: 'ops-search-mark' }, '⌕'),
+        h('input', {
+          className: 'ops-input',
+          value: query,
+          placeholder: '搜索名称 / IP / 账号 / 备注',
+          onChange: (e: any) => { setQuery(e.target.value); setPage(1) },
+        }),
+        query ? h('button', {
+          className: 'ops-search-clear',
+          onClick: () => { setQuery(''); setPage(1) },
+          'aria-label': '清除搜索',
+          title: '清除',
+        }, '✕') : null,
+      ),
+    ),
     editing && h(DeviceDialog, {
       editing,
       form,
@@ -729,6 +971,19 @@ function DeviceManager(): ReactElement {
       onSave: () => void save(),
       onClose: closeForm,
     }),
+    removing && h(ConfirmDialog, {
+      title: '删除设备',
+      lines: [
+        { label: '名称', value: removing.name },
+        { label: 'IP', value: `${removing.ip}:${removing.port}` },
+        { label: '账号', value: removing.account },
+        { label: '类型', value: DEVICE_TYPE_LABELS[removing.deviceType ?? 'other'] },
+      ],
+      warning: '删除后无法恢复，该设备的密码与配置会一并移除。已保存的连接日志会保留。',
+      confirmText: '删除',
+      onConfirm: () => void remove(removing.id),
+      onClose: () => setRemoving(null),
+    }),
     loading && devices.length === 0
       ? h('div', { className: 'ops-loading' }, '加载中…')
       : devices.length === 0
@@ -736,37 +991,58 @@ function DeviceManager(): ReactElement {
             h('b', null, '还没有设备'),
             '点击右上角「+ 新增设备」录入第一台设备，保存后即可一键连接 SSH 终端。',
           )
-        : h('div', { className: 'ops-list' }, devices.map((d) =>
-          h('div', { key: d.id, className: 'ops-dev' },
-            h('div', { className: 'ops-dev-top' },
-              h('span', { className: 'ops-dev-name', title: d.name }, d.name),
-              connectingId === d.id ? h(StatusBadge, { status: 'connecting' }) : null,
+        : filtered.length === 0
+          ? h('div', { className: 'ops-empty' },
+              h('b', null, '没有匹配的设备'),
+              `没有设备包含「${query.trim()}」，换个关键词或清除搜索。`,
+            )
+          : h(Fragment, null,
+              h('div', { className: 'ops-list' }, pageItems.map((d) => {
+                const live = liveLiveness[d.id]
+                return h('div', { key: d.id, className: 'ops-dev' },
+                  h('div', { className: 'ops-dev-top' },
+                    h('span', { className: 'ops-dev-name', title: d.name }, d.name),
+                    live ? h(LivenessBadge, { liveness: live, port: d.port }) : null,
+                    connectingId === d.id ? h(StatusBadge, { status: 'connecting' }) : null,
+                  ),
+                  h('div', { className: 'ops-dev-tags' },
+                    h('span', { className: 'ops-badge type', title: '设备类型' }, DEVICE_TYPE_LABELS[d.deviceType ?? 'other']),
+                  ),
+                  h('div', { className: 'ops-dev-meta' },
+                    h('code', null, d.ip),
+                    h('span', null, '·'),
+                    h('span', null, d.account),
+                    h('span', null, '·'),
+                    h('span', null, `SSH ${d.port}`),
+                    d.webPort ? h(Fragment, null, h('span', null, '·'), h('span', null, `Web ${d.webPort}`)) : null,
+                  ),
+                  d.note ? h('div', { className: 'ops-dev-note', title: d.note }, d.note) : null,
+                  h('div', { className: 'ops-dev-acts' },
+                    h('button', { className: 'ops-btn primary sm', onClick: () => connectDevice(d), disabled: connectingId === d.id }, connectingId === d.id ? '连接中…' : '连接设备'),
+                    h('button', { className: 'ops-btn sm', onClick: () => openEdit(d) }, '编辑'),
+                    h('button', {
+                      className: 'ops-btn sm',
+                      onClick: () => void duplicate(d),
+                      disabled: busy,
+                      title: '复制该设备（含已保存的密码），并打开编辑页改名保存',
+                    }, busy ? '复制中…' : '复制'),
+                    h('button', { className: 'ops-btn sm plain danger', onClick: () => setRemoving(d) }, '删除'),
+                  ),
+                )
+              })),
+              totalPages > 1 && h('div', { className: 'ops-pager' },
+                h('span', { className: 'ops-pager-info' },
+                  `第 ${currentPage}/${totalPages} 页 · ${filtered.length} 台`),
+                h('div', { className: 'ops-pager-acts' },
+                  h('button', {
+                    className: 'ops-btn sm', disabled: currentPage <= 1, onClick: () => setPage(currentPage - 1),
+                  }, '上一页'),
+                  h('button', {
+                    className: 'ops-btn sm', disabled: currentPage >= totalPages, onClick: () => setPage(currentPage + 1),
+                  }, '下一页'),
+                ),
+              ),
             ),
-            h('div', { className: 'ops-dev-tags' },
-              h('span', { className: 'ops-badge type', title: '设备类型' }, DEVICE_TYPE_LABELS[d.deviceType ?? 'other']),
-            ),
-            h('div', { className: 'ops-dev-meta' },
-              h('code', null, d.ip),
-              h('span', null, '·'),
-              h('span', null, d.account),
-              h('span', null, '·'),
-              h('span', null, `SSH ${d.port}`),
-              d.webPort ? h(Fragment, null, h('span', null, '·'), h('span', null, `Web ${d.webPort}`)) : null,
-            ),
-            d.note ? h('div', { className: 'ops-dev-note', title: d.note }, d.note) : null,
-            h('div', { className: 'ops-dev-acts' },
-              h('button', { className: 'ops-btn primary sm', onClick: () => connectDevice(d), disabled: connectingId === d.id }, connectingId === d.id ? '连接中…' : '连接设备'),
-              h('button', { className: 'ops-btn sm', onClick: () => openEdit(d) }, '编辑'),
-              h('button', {
-                className: 'ops-btn sm',
-                onClick: () => void duplicate(d),
-                disabled: busy,
-                title: '复制该设备（含已保存的密码），并打开编辑页改名保存',
-              }, busy ? '复制中…' : '复制'),
-              h('button', { className: 'ops-btn sm plain danger', onClick: () => remove(d.id) }, '删除'),
-            ),
-          ),
-        )),
   )
 }
 
@@ -1135,10 +1411,10 @@ function LogTab(): ReactElement {
     return () => clearInterval(iv)
   }, [refresh])
 
-  // Open the newest record automatically: an empty detail pane reads as broken.
-  useEffect(() => {
-    if (!activeId && logs.length) setActiveId(logs[0].id)
-  }, [activeId, logs])
+  // No auto-open any more (m03664). The detail is a dialog, and a dialog that
+  // opens by itself the moment the tab mounts — or every time a 5s poll notices
+  // the newest session — is an interruption, not a convenience. The list is the
+  // page; the operator opens what they want to read.
 
   useEffect(() => {
     if (!activeId) { setDetail(null); return }
@@ -1166,6 +1442,47 @@ function LogTab(): ReactElement {
       ),
     ),
     msg && h('div', { className: 'ops-msg ' + (msg.kind === 'ok' ? 'ok' : 'err') }, h('code', null, msg.text)),
+    // The transcript lives in a dialog now (m03664), so the log tab is a list of
+    // sessions and nothing else. Two columns in a 400px rail meant the session
+    // names were truncated to unreadable slivers; the list gets the full width
+    // and the detail gets a readable card.
+    detail && h(OpsModal, {
+      title: h(Fragment, null,
+        h('span', { className: 'ops-log-title' }, detail.deviceName),
+        h(StatusBadge, { status: detail.active ? 'ready' : 'closed' }),
+      ),
+      onClose: () => setActiveId(null),
+    },
+      detailLoading
+        ? h('div', { className: 'ops-loading' }, '加载中…')
+        : h(Fragment, null,
+            h('div', { className: 'ops-log-detail-meta' },
+              h('span', null, `会话 ${detail.connId.slice(0, 8)}`),
+              h('span', null, `开始 ${fmtTime(detail.startedAt)}`),
+              h('span', null, `结束 ${fmtTime(detail.endedAt)}`),
+              h('span', null, `命令 ${commandCount} 条`),
+              detail.deviceType ? h('span', null, DEVICE_TYPE_LABELS[detail.deviceType] ?? detail.deviceType) : null,
+            ),
+            h('div', { className: 'ops-log-detail-acts' },
+              h('button', {
+                className: 'ops-btn sm' + (showInput ? ' on' : ''),
+                onClick: () => setShowInput((v) => !v),
+                title: '逐字符的输入记录噪音很大，默认折叠',
+              }, showInput ? '隐藏逐键输入' : '显示逐键输入'),
+            ),
+            entries.length === 0
+              ? h('div', { className: 'ops-empty' }, '该记录没有可显示的条目')
+              : h('div', { className: 'ops-log-entries' }, entries.map((e) =>
+                  h('div', { key: e.seq, className: 'ops-log-entry ' + e.kind },
+                    h('span', { className: 'ops-log-entry-time' }, fmtTime(e.at).slice(6)),
+                    h('span', { className: 'ops-log-entry-kind' }, e.kind === 'command' ? '$' : e.kind === 'event' ? '•' : '⌨'),
+                    h('span', { className: 'ops-log-entry-src' }, SOURCE_LABEL[e.source || 'system'] || e.source),
+                    h('code', { className: 'ops-log-entry-text' },
+                      e.kind === 'input' ? fmtInput(e.text) : e.text),
+                  ),
+                )),
+          ),
+    ),
     loading && logs.length === 0
       ? h('div', { className: 'ops-loading' }, '加载中…')
       : logs.length === 0
@@ -1178,7 +1495,7 @@ function LogTab(): ReactElement {
               logs.map((l) =>
                 h('button', {
                   key: l.id,
-                  className: 'ops-log-row' + (l.id === activeId ? ' on' : ''),
+                  className: 'ops-log-row',
                   onClick: () => setActiveId(l.id),
                 },
                   h('div', { className: 'ops-log-row-top' },
@@ -1197,43 +1514,6 @@ function LogTab(): ReactElement {
                   h('div', { className: 'ops-log-row-sub' }, `${l.entryCount} 条记录 · ${l.endReason || (l.active ? '进行中' : '已结束')}`),
                 ),
               ),
-            ),
-            h('div', { className: 'ops-log-detail' },
-              detailLoading && !detail
-                ? h('div', { className: 'ops-loading' }, '加载中…')
-                : !detail
-                  ? h('div', { className: 'ops-empty' }, '选择左侧一条记录查看明细')
-                  : h(Fragment, null,
-                      h('div', { className: 'ops-log-detail-head' },
-                        h('b', null, detail.deviceName),
-                        h(StatusBadge, { status: detail.active ? 'ready' : 'closed' }),
-                        h('code', null, detail.connId.slice(0, 8)),
-                      ),
-                      h('div', { className: 'ops-log-detail-meta' },
-                        h('span', null, `开始 ${fmtTime(detail.startedAt)}`),
-                        h('span', null, `结束 ${fmtTime(detail.endedAt)}`),
-                        h('span', null, `命令 ${commandCount} 条`),
-                        detail.deviceType ? h('span', null, DEVICE_TYPE_LABELS[detail.deviceType] ?? detail.deviceType) : null,
-                      ),
-                      h('div', { className: 'ops-log-detail-acts' },
-                        h('button', {
-                          className: 'ops-btn sm' + (showInput ? ' on' : ''),
-                          onClick: () => setShowInput((v) => !v),
-                          title: '逐字符的输入记录噪音很大，默认折叠',
-                        }, showInput ? '隐藏逐键输入' : '显示逐键输入'),
-                      ),
-                      entries.length === 0
-                        ? h('div', { className: 'ops-empty' }, '该记录没有可显示的条目')
-                        : h('div', { className: 'ops-log-entries' }, entries.map((e) =>
-                            h('div', { key: e.seq, className: 'ops-log-entry ' + e.kind },
-                              h('span', { className: 'ops-log-entry-time' }, fmtTime(e.at).slice(6)),
-                              h('span', { className: 'ops-log-entry-kind' }, e.kind === 'command' ? '$' : e.kind === 'event' ? '•' : '⌨'),
-                              h('span', { className: 'ops-log-entry-src' }, SOURCE_LABEL[e.source || 'system'] || e.source),
-                              h('code', { className: 'ops-log-entry-text' },
-                                e.kind === 'input' ? fmtInput(e.text) : e.text),
-                            ),
-                          )),
-                    ),
             ),
           ),
   )

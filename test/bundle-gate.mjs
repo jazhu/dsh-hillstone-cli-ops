@@ -9,6 +9,12 @@ const pkgRoot = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/
 const client = readFileSync(new URL('../dist/client.js', import.meta.url), 'utf-8')
 const host = readFileSync(new URL('../dist/index.mjs', import.meta.url), 'utf-8')
 
+// Declared before any check runs. The negative assertions below increment it,
+// and a `bad++` that executes before this `let` initialises would throw a TDZ
+// ReferenceError instead of reporting the miss — the gate would die on exactly
+// the failure it exists to catch.
+let bad = 0
+
 const checks = [
   ['client  16-colour cursorAccent', /cursorAccent/, client],
   ['client  monospace font stack', /Cascadia Mono/, client],
@@ -81,6 +87,26 @@ const checks = [
   // esbuild rewrites string quotes, so a literal `'terminal'` in the source is
   // `"terminal"` in the product — never pin the quote style in a grep.
   ['client  pending connect switches to the terminal tab', /onRevealTerminal\(\(\) => setTab\(['"]terminal['"]\)\)/, client],
+  // m03664 — the device dialog was covering the whole app: a full-viewport
+  // centred overlay, a 40px backdrop blur, and window.confirm for deletes. The
+  // card is anchored to the right edge, the scrim is nearly transparent, and
+  // delete goes through the same dialog language. Each is asserted by ABSENCE
+  // below, because each one is a regression that a reader would not spot in
+  // the markup.
+  ['client  dialog is anchored to the right edge', /\.ops-modal-scrim \{[^}]*justify-content: flex-end/, client],
+  ['client  scrim does not swallow clicks', /\.ops-modal-scrim \{[^}]*pointer-events: none/, client],
+  ['client  search box', /\.ops-search \{/, client],
+  ['client  device list paginates', /\.ops-pager \{/, client],
+  ['client  device cards keep the 复制 action', /duplicate\(/, client],
+  ['client  liveness badge', /LivenessBadge|ops-badge online|\\u7AEF\\u53E3\\u53EF\\u8FBE|端口可达/, client],
+  // m03664 — the log transcript moved into the same dialog. Match the compiled
+  // shape: esbuild rewrites `h(` into `(0, import_react.createElement)(`, so a
+  // source-shaped regex silently stops matching after a build.
+  ['client  log transcript opens in the dialog', /detail && \(0, import_react\.createElement\)\(\s*OpsModal|detail && h\(OpsModal/, client],
+  // m03664 — a browser cannot open a raw TCP socket, so the host owns the probe.
+  ['host    liveness probe route', /devices\/ping/, host],
+  ['host    TCP probe uses a socket', /net\.connect|node:net/, host],
+  ['host    probe has a timeout', /PING_TIMEOUT_MS|setTimeout/, host],
 ]
 
 // Assert the ABSENCE directly: every check above greps dist/, so a removed
@@ -103,11 +129,39 @@ const railIcon = /icon: IconComponent/.test(client)
 console.log(`${railIcon ? '  ok  ' : '  MISS'} client  right-rail tab keeps its guide icon`)
 if (!railIcon) bad++
 
-let bad = 0
 for (const [name, re, hay] of checks) {
   const ok = re.test(hay)
   if (!ok) bad++
   console.log(`${ok ? '  ok  ' : '  MISS'} ${name}`)
+}
+
+// m03664 — the negatives that matter most. Each of these is a "we tried it and
+// it was worse" decision, and nothing in the markup makes them obvious, so they
+// are pinned explicitly.
+//
+// They are matched against the *stylesheet*, not the bundle and not the whole
+// source. A blanket /backdrop-filter/ over the bundle matches two innocent
+// things: this plugin's own comment explaining why the blur was dropped, and a
+// `confirm()` inside inlined xterm that guards its own external-link prompt.
+// Neither is a regression, and a gate that cries wolf on those gets deleted.
+// Match the decision, in the place the decision lives.
+const clientSrc = readFileSync(new URL('../src/client.tsx', import.meta.url), 'utf-8')
+const panelCss = (clientSrc.match(/const panelCss = `([\s\S]*?)\n`\n/) || [, ''])[1]
+if (!panelCss) {
+  console.log('  MISS client  could not extract panelCss from src/client.tsx')
+  bad++
+}
+for (const [name, hit] of [
+  // A 40px backdrop blur turned the conversation behind the dialog into a wash.
+  ['client  no backdrop blur on the dialog (m03664)', /backdrop-filter/.test(panelCss)],
+  // window.confirm blocks the whole app and cannot show which device goes.
+  ['client  no window.confirm left (m03664)', /\bconfirm\(/.test(clientSrc)],
+  // The log transcript used to auto-open on mount, and a dialog that opens by
+  // itself is an interruption.
+  ['client  log detail does not auto-open (m03664)', /if \(!activeId && logs\.length\) setActiveId/.test(clientSrc)],
+]) {
+  console.log(`${hit ? '  MISS' : '  ok  '} ${name}`)
+  if (hit) bad++
 }
 
 // Invert the "no external xterm" check: its regex above always matches, so assert
