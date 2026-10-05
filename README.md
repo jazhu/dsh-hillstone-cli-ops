@@ -9,6 +9,8 @@ The plugin is a two-half DSH plugin: a Node host half (SSH, encryption, session
 logs, the agent tools) and a browser client half (the sidebar tab and an xterm.js
 terminal). Both are built from one `src/` tree.
 
+[中文说明](README.zh-CN.md)
+
 ---
 
 ## What you get
