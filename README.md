@@ -55,8 +55,15 @@ pnpm pack && <your-dsh-plugin-install-command> ./dsh-hillstone-cli-ops-1.0.0.tgz
 does not rebuild the host fiber in a running process, so new host code (SSH
 handling, the tools, the log writer) only takes effect on a real restart.
 
-Requirements: Node 22+, a DSH build that exposes the `tools` and
-`sidebarRightTabs` services, and `ssh2` / `xterm` (installed by `pnpm install`).
+Requirements: Node 22+, a DSH build that exposes the `tools`, `slots`,
+`sidebarRightTabs`, `sidebarRight` and `uiWorkspace` services, and `ssh2` /
+`xterm` (installed by `pnpm install`).
+
+`package.json` lists the client services under `dsh.client.inject`, and that list
+is load-bearing: it is what the loader reads before any code runs. The client
+half's own `export const inject` and the manifest are two independent statements
+of the same fact, so `test/bundle-gate.mjs` compares them and fails when they
+drift. Keep both in step when you add a service.
 
 ---
 
@@ -180,6 +187,21 @@ An earlier version parked a single boolean. It looked correct in the common case
 — one session, one panel — and would be claimed by whichever conversation's panel
 happened to mount first, which is the same wrong-session bug one layer down. The
 per-session map is what keeps that from coming back.
+
+### What the tab says about itself
+
+The right rail shows a tab's `guide` entry before anyone opens it, so that text
+is the plugin's description to a user who has never seen the panel. It drifted
+for a long time — it still advertised only "device management and an SSH
+terminal" after the panel had grown search, pagination, a liveness probe, an
+audit log and the auto-jump above. A stale guide is worse than a missing one:
+there is no cue that what you are about to open is not what the label says.
+
+Two things keep it honest. The wording now matches the panel, and the gate
+asserts it, so deleting the description fails the build instead of shipping.
+That assertion decodes the bundle's `\uXXXX` escapes before matching — esbuild
+emits `charset: ascii`, and hand-copying escapes into a regex produced a check
+that missed a string the artefact already contained.
 
 ### A local API on a fixed port
 

@@ -136,6 +136,40 @@ const checks = [
   ['client  the reveal asks before it opens the tab', /requestRevealTerminal\(c\.originSessionId\)[\s\S]{0,400}?revealSidebar\?\.\(c\.originSessionId\)/, client],
 ]
 
+// m05105 — the manifest is what the loader reads BEFORE any code runs. It listed
+// `["slots"]` while the client half injects four services, so the declared set
+// had been drifting from the real one with nothing to notice it. This reads
+// package.json (not the bundle) because that is the surface the loader sees.
+// Strip a leading BOM first: every JSON.parse of a source-controlled file
+// eventually gets handed one by some editor on Windows, and the symptom is a
+// raw SyntaxError from this line — a crash that looks like a broken gate and
+// says nothing about drift.
+const pkgText = readFileSync(new URL('../package.json', import.meta.url), 'utf-8').replace(/^﻿/, '')
+const pkg = JSON.parse(pkgText)
+const declaredInject = ((pkg.dsh && pkg.dsh.client && pkg.dsh.client.inject) || []).slice().sort()
+const actualInject = (readFileSync(new URL('../src/client.tsx', import.meta.url), 'utf-8')
+  .match(/export const inject = \[([^\]]*)\]/) || [, ''])[1]
+  .split(',')
+  .map((s) => s.trim().replace(/^['"]|['"]$/g, ''))
+  .filter(Boolean)
+  .sort()
+const injectDrift = declaredInject.join(',') === actualInject.join(',')
+console.log(`${injectDrift ? '  ok  ' : '  MISS'} pkg     client inject list matches src (m05105: declared [${declaredInject.join(', ')}] vs actual [${actualInject.join(', ')}])`)
+if (!injectDrift) bad++
+
+// m05105 — the tab's guide text is the one description a user reads in the UI
+// before opening the panel, so it has to say what the panel does *now* rather
+// than what it did when the tab was registered. Match the shipped CJK directly:
+// esbuild emits `charset: ascii`, so the bundle carries \uXXXX escapes, and
+// hand-copying those escapes into a regex is how this check first came to lie
+// (it missed a string that was in the artefact all along).
+const clientText = client.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+const guideExplains = clientText.includes('管理 Hillstone / StoneOS 设备')
+  && clientText.includes('自动切到终端页')
+  && clientText.includes('连接审计日志')
+console.log(`${guideExplains ? '  ok  ' : '  MISS'} client  the tab guide describes the current panel (m05105)`)
+if (!guideExplains) bad++
+
 // Assert the ABSENCE directly: every check above greps dist/, so a removed
 // feature can only be proven gone by looking for it. The SG-6000 answers
 // `terminal length 0` with `^-----unrecognized keyword` and paginates anyway,

@@ -1,7 +1,7 @@
 {
   "name": "dsh-hillstone-cli-ops",
   "displayName": "DSH Hillstone CLI 运维",
-  "description": "设备运维终端插件：右侧栏「设备运维」标签页，管理 Hillstone 设备（增删改查 + SSH 终端）。",
+  "description": "设备运维终端插件：右侧栏「设备运维」标签页，管理 Hillstone / StoneOS 设备（增删改查 + 搜索分页 + 端口存活探测 + SSH 终端 + 连接审计日志），并向 agent 提供 7 个 hillstone_* 运维工具。连接成功后自动切到终端页，agent 触发的连接会展开到发起它的那个会话。",
   "version": "1.0.0",
   "type": "module",
   "license": "MIT",
@@ -22,7 +22,10 @@
     },
     "client": {
       "inject": [
-        "slots"
+        "slots",
+        "sidebarRightTabs",
+        "sidebarRight",
+        "uiWorkspace"
       ],
       "platform": "web"
     }

@@ -1693,7 +1693,7 @@ function TerminalTab(): ReactElement {
       : !connecting
         ? h('div', { className: 'ops-empty' },
             h('b', null, '暂无连接'),
-            '在「设备管理」中点击「连接设备」，即可在这里打开该设备的 SSH 终端。',
+            '连接成功后会自动切到这个页面。在「设备管理」中点击「连接设备」，或让 agent 调用 hillstone_open_terminal，即可在这里打开 SSH 终端。',
           )
         : null,
     h('div', { style: { flex: 1, minHeight: 320 } }, active ? h(TerminalPane, { key: active.connId, conn: active }) : null),
@@ -1778,7 +1778,8 @@ export function apply(ctx: any): void {
               {
                 order: 20,
                 title: () => '设备运维',
-                description: () => 'Hillstone 设备管理与 SSH 终端',
+                description: () =>
+                  '管理 Hillstone / StoneOS 设备，打开 SSH 终端并查看连接审计日志；连接成功后自动切到终端页，可直接看实时输出。',
                 icon: IconComponent,
               },
             ],
