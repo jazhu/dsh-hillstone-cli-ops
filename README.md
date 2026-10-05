@@ -17,7 +17,7 @@ terminal). Both are built from one `src/` tree.
 
 | Tab | What it does |
 | --- | --- |
-| **设备管理** | CRUD devices (name / IP / account / password / SSH port / device type / web port / note). 新增, 复制 and 编辑 all run in one centred dialog. |
+| **设备管理** | CRUD devices (name / IP / account / password / SSH port / device type / web port / note). 新增, 复制 and 编辑 all run in one centred dialog. Each card has a **WebUI 登录** button — see below. |
 | **终端** | One xterm.js terminal per live connection. Input goes to the host, device output streams back over SSE. A new connection switches this panel straight to 终端, so you land on the live session instead of the device list. |
 | **日志** | The per-connection audit trail: who connected to which device, what was typed, which commands were run, when and why the session ended. |
 
@@ -32,6 +32,39 @@ host LLM with a natural-language task ("检查接口状态和 CPU 负载"). By d
 reuses a terminal session an operator already has open, so you can watch the
 agent work in the tab; with no live session it falls back to a one-shot exec
 channel.
+
+### WebUI 登录
+
+Every device card has a **WebUI 登录** button. It opens the device's management
+UI in a real browser window, logs in with the account already stored for that
+device, and leaves the window on your desktop — you then work in the browser
+yourself.
+
+```
+https://<device ip>:<web port or 443>/
+```
+
+Three things are worth knowing before you use it:
+
+- **The password never reaches the panel.** The host decrypts it, types it into
+  the form, and reports back only a verdict — 已登录 / 需人工完成 / 失败. The
+  browser half of this plugin cannot see a password at all.
+- **It makes exactly one attempt, and that is on purpose.** After a single wrong
+  password the device starts demanding a graphical captcha, and once it is
+  demanding one, no further automatic attempt can succeed. So a failure is
+  reported as 需人工完成 with the window left open for you to finish by hand,
+  rather than being retried into a lockout.
+- **The profile is persistent** (`<data dir>/webui/<device id>`), so the second
+  press on the same device usually reopens an already-logged-in session without
+  touching the password again.
+
+The button launches a headed Chromium on the machine running DSH — it is not a
+headless check, and it takes over part of the screen while it runs.
+
+The browser is Playwright's bundled Chromium. `pnpm install` pins a Playwright
+version whose browser revision matches what a normal desktop already has cached,
+so nothing is downloaded; if you bump Playwright and it asks for a new browser,
+run `npx playwright install chromium` once.
 
 ---
 
@@ -91,6 +124,27 @@ carriage return.
 We do **not** send `terminal length 0` on connect. The SG-6000 rejects it with
 `^-----unrecognized keyword` and paginates anyway, so it achieved nothing except
 putting a bogus device error at the top of every session.
+
+### One login attempt, because the second one cannot work
+
+The device's login endpoint answers a wrong password with an error *and* starts
+demanding a graphical captcha. The captcha is not a soft lockout that clears
+itself — it is on the form from then on, and the endpoint does not exempt a
+correct password from it. So an automatic login that retried would be a
+guaranteed failure on its second attempt, and would look like "the password is
+wrong" when the truth is "the first attempt was wrong, and now a human is
+required".
+
+The login therefore runs once, reads its verdict off the `POST /rest/login`
+response body (`{"success":true…}` or an `exception.message` plus a captcha
+demand), and hands the window over. The panel labels that outcome 需人工完成
+rather than 失败, because a captcha is work waiting for a person, not a fault.
+
+Two smaller decisions follow from the same measurement: the verdict comes from
+the response body rather than from scraping the page, because the post-login
+page is full of hundreds of unrelated form elements; and Playwright is loaded
+with a **dynamic** `import()` so a missing install fails one button press with a
+readable message instead of taking the whole host plugin down at load.
 
 ### `send_input` submits, but knows when not to
 

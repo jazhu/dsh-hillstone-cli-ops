@@ -54,6 +54,13 @@ import type {
 } from './types.ts'
 import { normalizeDeviceType } from './types.ts'
 import {
+  webLogin,
+  webLoginClose,
+  webLoginStates,
+  webLoginForgetAll,
+  webLoginUrl,
+} from './web-login.ts'
+import {
   SessionLogWriter,
   ensureLogDir,
   listSessionLogs,
@@ -1113,6 +1120,13 @@ async function handleApi(deps: ApiDeps, req: IncomingMessage, res: ServerRespons
       writeJson(res, 200, { ok: true, log: detail })
       return
     }
+    // GET /ops-api/web-login  → what the host currently knows about each
+    // device's management-UI window (m05288). A report, so a reloaded panel
+    // shows a window that is still open instead of offering to open another.
+    if (pathname === '/web-login') {
+      writeJson(res, 200, { ok: true, states: webLoginStates() })
+      return
+    }
     writeJson(res, 404, { ok: false, error: { code: 'not-found', message: 'unknown ops-api route' } })
     return
   }
@@ -1321,6 +1335,60 @@ async function handleApi(deps: ApiDeps, req: IncomingMessage, res: ServerRespons
         analysisUnavailable: unavailable,
       }
       writeJson(res, 200, { ok: true, ...resp })
+      return
+    }
+    // POST /ops-api/web-login  → open a device's management UI in a real
+    // browser window and log in with the stored account (m05288).
+    //
+    // This is the one route that needs the plaintext password, and the reason
+    // it can be is that the host is the only party that ever holds it: the
+    // browser half posts a deviceId, the host decrypts, types it, and returns a
+    // verdict that says nothing about the secret. The response is 200 even on a
+    // rejected login — "the device said no" is an answer, not a transport
+    // failure, and the client renders it as text.
+    if (pathname === '/web-login') {
+      const body = JSON.parse((await readBody(req)) || '{}') as { deviceId?: string }
+      if (!body.deviceId) {
+        writeJson(res, 400, { ok: false, error: { code: 'bad-request', message: 'deviceId required' } })
+        return
+      }
+      const device = deps.store.devices.get(body.deviceId)
+      if (!device) {
+        writeJson(res, 404, { ok: false, error: { code: 'not-found', message: 'device not found' } })
+        return
+      }
+      let password: string
+      try {
+        password = decryptSecret(deps.store.key, device.password)
+      } catch (e) {
+        // An undecryptable secret means ops.key was replaced or the record was
+        // written by another install. Say so instead of opening a doomed window.
+        writeJson(res, 400, {
+          ok: false,
+          error: { code: 'bad-credentials', message: `无法解密该设备的密码：${(e as Error).message}。请在编辑设备里重新设置密码。` },
+        })
+        return
+      }
+      try {
+        const state = await webLogin(device, password, deps.store.dir)
+        writeJson(res, 200, { ok: true, state })
+      } catch (e) {
+        writeJson(res, 500, { ok: false, error: { code: 'web-login-failed', message: (e as Error).message } })
+      } finally {
+        // Drop the plaintext as soon as it is no longer needed. It was a
+        // parameter, never a field, so there is nothing else to clear.
+        password = ''
+      }
+      return
+    }
+    // POST /ops-api/web-login/close  → close a device's window.
+    if (pathname === '/web-login/close') {
+      const body = JSON.parse((await readBody(req)) || '{}') as { deviceId?: string }
+      if (!body.deviceId) {
+        writeJson(res, 400, { ok: false, error: { code: 'bad-request', message: 'deviceId required' } })
+        return
+      }
+      writeJson(res, 200, { ok: true, closed: await webLoginClose(body.deviceId) })
       return
     }
     writeJson(res, 404, { ok: false, error: { code: 'not-found', message: 'unknown ops-api route' } })
@@ -1999,6 +2067,10 @@ function activate(ctx: ContextLike, config?: Partial<Config>): void {
           cleanup(s, '宿主插件卸载，会话结束')
         }
         sessions.clear()
+        // Every management-UI window belongs to this fiber (m05288). A reload
+        // that left them behind would strand a browser nobody can close from
+        // the panel, holding the device's profile directory open.
+        void webLoginForgetAll()
         try {
           server.close()
         } catch {
@@ -2010,6 +2082,15 @@ function activate(ctx: ContextLike, config?: Partial<Config>): void {
     /* ignore */
   }
 }
+
+/**
+ * Exported for the offline regression (m05288). The URL rule — fall back to 443
+ * when a device has no web port, bracket an IPv6 literal — is the part of
+ * WebUI login that can be proven without launching a browser, and it is the part
+ * that was silently wrong before: both real devices had `webPort: null`, so
+ * "https://ip:null" was the URL this would have built.
+ */
+export { webLoginUrl } from './web-login.ts'
 
 export function apply(ctx: ContextLike, config?: Partial<Config>): void {
   try {

@@ -186,6 +186,9 @@ const apiPort = await freePort()
 const apiPort2 = await freePort()
 
 const mod = await import(HOST_BUNDLE)
+/** The URL rule, re-exported by the host bundle (m05288) so it can be proven
+ *  without launching a browser. See the WebUI block near the end. */
+const webLoginUrl = mod.webLoginUrl
 /** Mirrors the host's per-entry text cap; the assertion needs the real number,
  *  and re-declaring it here is what makes the test a specification. */
 const MAX_TEXT = 4096
@@ -722,6 +725,54 @@ check('the probe needs no password to reach a verdict', await (async () => {
   return r?.state === 'online' && !('password' in r)
 })(), 'a device with a stored password probed without touching it')
 await j(`/devices/${deadDevice.device.id}`, { method: 'DELETE' })
+
+// m05288 — WebUI login. The browser half cannot be exercised offline, so these
+// assertions cover the contract that actually makes it safe: the password stays
+// on the host, a device with no web port still gets a verdict-shaped answer
+// rather than a crash, and the report is a list even when nothing is open.
+// What is deliberately NOT asserted: any successful login. A test that spun up
+// a real browser to prove one would be a test that passes on the developer's
+// network and fails in CI, and the login itself is the one thing here that is
+// already covered by hand on a real device.
+const webReport = await j('/web-login')
+check('the WebUI report is a list, empty when no window is open',
+  webReport.ok === true && Array.isArray(webReport.states) && webReport.states.length === 0,
+  JSON.stringify(webReport).slice(0, 200))
+
+// The regression device has no webPort, which is the common case (both real
+// devices had null). The URL is proved as a pure function instead of by calling
+// the route, because calling it really does launch a Chromium window on the
+// operator's desktop — a regression suite must never take over the screen of
+// the machine it runs on. A null port would have built "https://ip:null".
+// The address is RFC 5737 documentation space: the rule is about the port and
+// the brackets, so there is no reason to publish a real device's IP here.
+const DOC_IP = '198.51.100.7'
+check('a device with no web port falls back to 443',
+  webLoginUrl({ ip: DOC_IP, webPort: null }) === `https://${DOC_IP}:443/`,
+  webLoginUrl({ ip: DOC_IP, webPort: null }))
+check('a device with a web port uses it',
+  webLoginUrl({ ip: DOC_IP, webPort: 8443 }) === `https://${DOC_IP}:8443/`,
+  webLoginUrl({ ip: DOC_IP, webPort: 8443 }))
+// An IPv6 literal must be bracketed or the port becomes part of the address.
+check('an IPv6 address is bracketed so the port still parses',
+  webLoginUrl({ ip: 'fd00::1', webPort: 443 }) === 'https://[fd00::1]:443/',
+  webLoginUrl({ ip: 'fd00::1', webPort: 443 }))
+
+const badDevice = await j('/web-login', { method: 'POST', body: { deviceId: 'no-such-device' } })
+check('WebUI login on an unknown device is refused', badDevice.ok === false, JSON.stringify(badDevice).slice(0, 200))
+check('a refusal never echoes the password back to the browser',
+  JSON.stringify(badDevice).includes(PASSWORD) === false, JSON.stringify(badDevice).slice(0, 200))
+
+// The close route answers `closed: false` for a window that was never open.
+// Asserting `ok === true || ok === false` here would have passed no matter what
+// the route did, including crashing into the 404 fallthrough — the check has to
+// name the real contract or it is decoration.
+const closeUnused = await j('/web-login/close', { method: 'POST', body: { deviceId } })
+check('closing a window that was never opened succeeds but reports closed:false',
+  closeUnused.ok === true && closeUnused.closed === false, JSON.stringify(closeUnused).slice(0, 200))
+const closeNoId = await j('/web-login/close', { method: 'POST', body: {} })
+check('close without a deviceId is a 400, not a silent no-op',
+  closeNoId.ok === false && closeNoId.error?.code === 'bad-request', JSON.stringify(closeNoId).slice(0, 200))
 
 console.log(`\n${pass} passed, ${fail} failed`)
 sshServer.close()

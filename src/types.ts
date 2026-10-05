@@ -121,6 +121,36 @@ export interface LivenessReport {
   results: DeviceLiveness[]
 }
 
+/**
+ * Outcome of a WebUI login attempt (m05288).
+ *
+ * The status is a *report*, not a request: the browser window belongs to the
+ * operator the moment automation is done, so every status except `error` can
+ * end with a live window on screen.
+ *
+ *   idle    — nothing attempted yet.
+ *   ready   — the device accepted the credentials (or the saved session was
+ *             still valid). The window shows the management UI.
+ *   captcha — the device rejected the password and now demands a graphical
+ *             captcha. Automation stops here on purpose: a second automated
+ *             attempt would fail even with the right password, so the operator
+ *             finishes the login in the window by hand.
+ *   error   — the page never loaded, the browser could not start, or the device
+ *             did not answer.
+ */
+export type WebLoginStatus = 'idle' | 'ready' | 'captcha' | 'error'
+
+export interface WebLoginState {
+  deviceId: string
+  /** The management UI URL that was opened, for display. */
+  url: string
+  status: WebLoginStatus
+  /** ISO time of this verdict. */
+  at: string
+  /** Human-readable reason, always present for `captcha` and `error`. */
+  message?: string
+}
+
 /** Agent analysis request: run one or more commands and analyze the output. */
 export interface AnalyzeRequest {
   deviceId: string

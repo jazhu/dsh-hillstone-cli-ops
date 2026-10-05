@@ -11,6 +11,12 @@
  * `ssh2` is a Node-only native-ish module: it stays external in the host build
  * and resolves from node_modules at runtime.
  *
+ * `playwright` is the same story for a different reason: it must stay external
+ * so its ~100MB of bundled browser-management code never lands in dist/index.mjs,
+ * and so a missing install is a catchable error on one button press (see
+ * src/web-login.ts's dynamic import) rather than a load-time failure of the
+ * whole host plugin.
+ *
  * `xterm` / `xterm-addon-fit` are INLINED into the client bundle (NOT external).
  * Reason: DSH's client module-table seed only exposes react/react-dom and the
  * `@deepseek-ai/*` packages; xterm is bundled internally by DSH but is not
@@ -36,7 +42,7 @@ await build({
   platform: 'node',
   target: ['node22'],
   sourcemap: true,
-  external: [...dshExternal, 'ssh2'],
+  external: [...dshExternal, 'ssh2', 'playwright'],
   logLevel: 'info',
 })
 

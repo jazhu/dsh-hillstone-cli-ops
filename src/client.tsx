@@ -50,7 +50,7 @@ import { FitAddon } from 'xterm-addon-fit'
 // into <head> at runtime, because the harness does not expose xterm as a resolvable
 // client module and we cannot rely on a separately-served stylesheet asset.
 import xtermCss from 'xterm/css/xterm.css'
-import type { DeviceDTO, ConnectionInfo, DeviceType, DeviceLiveness, LogEntry, SessionLog, SessionLogDetail } from './types.ts'
+import type { DeviceDTO, ConnectionInfo, DeviceType, DeviceLiveness, LogEntry, SessionLog, SessionLogDetail, WebLoginState, WebLoginStatus } from './types.ts'
 import { DEVICE_TYPES, DEVICE_TYPE_LABELS } from './types.ts'
 
 // Inject xterm's stylesheet exactly once so the terminal renders correctly.
@@ -435,6 +435,18 @@ const panelCss = `
 .ops-select { appearance: auto; cursor: pointer; background-color: var(--dsw-alias-bg-layer-2, #2c2c2e); color: var(--dsw-alias-label-primary, #f9fafb); }
 .ops-select option { background-color: var(--dsw-alias-bg-layer-2, #2c2c2e); color: var(--dsw-alias-label-primary, #f9fafb); }
 
+/* WebUI login (m05288). The verdict lives under the buttons rather than in the
+   top-level banner because it is per device: a banner can only say one thing at
+   a time, and the operator pressing 登录 on three boxes needs to see all three
+   outcomes. The captcha state gets the warn colour because it is the one state
+   that needs the operator to go and do something, in the window, by hand. */
+.ops-webui { display: flex; align-items: flex-start; gap: 6px; margin-top: 8px; padding: 6px 9px; border-radius: var(--dsw-radius-sm, 8px); font-size: 12px; line-height: 18px; border: 1px solid transparent; }
+.ops-webui b { flex: none; font-weight: 500; }
+.ops-webui span { min-width: 0; word-break: break-word; }
+.ops-webui.ready { color: var(--dsw-alias-state-success-primary, #22c55e); background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #22c55e) 10%, transparent); border-color: color-mix(in srgb, var(--dsw-alias-state-success-primary, #22c55e) 26%, transparent); }
+.ops-webui.captcha { color: var(--dsw-alias-state-warn-label, #dd8629); background: color-mix(in srgb, var(--dsw-alias-state-warn-label, #dd8629) 12%, transparent); border-color: color-mix(in srgb, var(--dsw-alias-state-warn-label, #dd8629) 28%, transparent); }
+.ops-webui.error { color: var(--dsw-alias-state-error-primary, #f85149); background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f85149) 10%, transparent); border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f85149) 26%, transparent); }
+
 /* Badges / status dots */
 .ops-badge { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; line-height: 18px; padding: 1px 9px; border-radius: 999px; }
 .ops-badge b { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
@@ -548,6 +560,34 @@ function Field({ label, hint, ...rest }: { label: string; hint?: string } & Reco
 
 /** Devices per page in the device list (m03664). */
 const PAGE_SIZE = 20
+
+/**
+ * WebUI login verdicts (m05288), rendered on the card that earned them.
+ *
+ * `captcha` is deliberately NOT labelled 失败: the device did not fail to
+ * respond, it asked for a human. Calling that an error would tell the operator
+ * to press something that is already the only thing left to press.
+ */
+const WEBUI_TEXT: Record<WebLoginStatus, string> = {
+  idle: '未登录',
+  ready: '已登录',
+  captcha: '需人工完成',
+  error: '失败',
+}
+
+/**
+ * One device's management-UI verdict.
+ *
+ * The message is not truncated: it says what the device refused and what to do
+ * next ("请在打开的窗口里手动完成"), and clipping that off to fit a narrow rail
+ * is what turns a clear instruction into a shrug.
+ */
+function WebUiVerdict({ state }: { state: WebLoginState }): ReactElement {
+  return h('div', { className: 'ops-webui ' + state.status, title: state.message || state.url },
+    h('b', null, `WebUI ${WEBUI_TEXT[state.status] ?? state.status}`),
+    h('span', null, state.message || state.url),
+  )
+}
 
 // DeviceLiveness is shared with the host so the probe endpoint's response shape
 // and the card badge cannot drift apart. `online` means the SSH port completed a
@@ -825,6 +865,60 @@ function DeviceManager(): ReactElement {
   // so this map is pruned against the current list on every render of the list.
   const [liveness, setLiveness] = useState<Record<string, DeviceLiveness>>({})
   const [probing, setProbing] = useState(false)
+  // m05288: the last WebUI login verdict per device, and which device has a
+  // login in flight. Kept apart because one is a report from the host and the
+  // other is local optimism — the button must say 登录中… on its own evidence,
+  // not on a state that only changes when a request comes back.
+  const [webUi, setWebUi] = useState<Record<string, WebLoginState>>({})
+  const [webUiBusy, setWebUiBusy] = useState<string | null>(null)
+
+  /**
+   * Ask the host to open a device's management UI and log in (m05288).
+   *
+   * The host is the only side that holds the password, so this posts a
+   * deviceId and gets back a verdict — never a secret. The window itself opens
+   * on the operator's desktop, so a success here is not "you are logged in",
+   * it is "the window you asked for is on screen".
+   */
+  const webLogin = async (d: DeviceDTO) => {
+    if (webUiBusy) return
+    setWebUiBusy(d.id)
+    // Optimistic, so a slow browser launch still shows something happening on
+    // the right card. The host overwrites it with the real verdict.
+    setWebUi((prev) => ({
+      ...prev,
+      [d.id]: { deviceId: d.id, url: '', status: 'idle', at: new Date().toISOString(), message: '正在打开浏览器并登录…' },
+    }))
+    try {
+      const j = (await api<{ state: WebLoginState }>('/web-login', { method: 'POST', body: { deviceId: d.id } })) as any
+      const state = j.state as WebLoginState | undefined
+      if (state) setWebUi((prev) => ({ ...prev, [d.id]: state }))
+      else setMsg({ kind: 'err', text: `WebUI 登录失败：host 没有返回结果（${d.name}）` })
+    } catch (e) {
+      const text = `WebUI 登录失败：${(e as Error).message}`
+      setWebUi((prev) => ({
+        ...prev,
+        [d.id]: { deviceId: d.id, url: '', status: 'error', at: new Date().toISOString(), message: text },
+      }))
+    } finally {
+      setWebUiBusy(null)
+    }
+  }
+  const webLoginClose = async (d: DeviceDTO) => {
+    setWebUiBusy(d.id)
+    try {
+      await api('/web-login/close', { method: 'POST', body: { deviceId: d.id } })
+      setWebUi((prev) => {
+        const next = { ...prev }
+        delete next[d.id]
+        return next
+      })
+    } catch (e) {
+      setMsg({ kind: 'err', text: (e as Error).message })
+    } finally {
+      setWebUiBusy(null)
+    }
+  }
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -838,9 +932,44 @@ function DeviceManager(): ReactElement {
     }
   }, [])
 
+  /**
+   * Pull the host's WebUI window report (m05288).
+   *
+   * Separate from `refresh` on purpose: it is the one piece of device state the
+   * host can change without anyone touching the panel — the operator closing a
+   * browser window is an action the panel never sees. So the report is also
+   * polled while the tab is open, or the card would keep advertising a window
+   * that is gone until the next manual refresh.
+   */
+  const refreshWebUi = useCallback(async () => {
+    try {
+      const j = (await api<{ states: WebLoginState[] }>('/web-login')) as any
+      const next: Record<string, WebLoginState> = {}
+      for (const s of (j.states || []) as WebLoginState[]) next[s.deviceId] = s
+      // Never clobber a verdict that a request in flight is still filling in.
+      setWebUi((prev) => {
+        if (webUiBusy && prev[webUiBusy]?.message === '正在打开浏览器并登录…') {
+          return { ...next, [webUiBusy]: prev[webUiBusy] }
+        }
+        return next
+      })
+    } catch {
+      /* the report is advisory; a failed poll must not disturb the panel */
+    }
+  }, [webUiBusy])
+
   useEffect(() => {
     refresh()
   }, [refresh])
+
+  // Poll the WebUI report while this tab is open (see refreshWebUi). 8s: the
+  // only change being detected is a window the operator closed by hand, which
+  // is a low-frequency event and not worth a tighter poll.
+  useEffect(() => {
+    refreshWebUi()
+    const iv = setInterval(() => void refreshWebUi(), 8000)
+    return () => clearInterval(iv)
+  }, [refreshWebUi])
 
   const openCreate = () => {
     setEditing({ id: '__new__' })
@@ -1029,6 +1158,9 @@ function DeviceManager(): ReactElement {
   // not keep a badge alive in the map forever.
   const knownIds = new Set(devices.map((d) => d.id))
   const liveLiveness = Object.fromEntries(Object.entries(liveness).filter(([id]) => knownIds.has(id)))
+  // Same rule for the WebUI verdicts, plus the host's own report: a device whose
+  // window the operator closed is no longer a device with a verdict.
+  const liveWebUi = Object.fromEntries(Object.entries(webUi).filter(([id]) => knownIds.has(id)))
 
   return h(Fragment, null,
     h('div', { className: 'ops-head' },
@@ -1107,6 +1239,8 @@ function DeviceManager(): ReactElement {
           : h(Fragment, null,
               h('div', { className: 'ops-list' }, pageItems.map((d) => {
                 const live = liveLiveness[d.id]
+                const wu = liveWebUi[d.id]
+                const wuBusy = webUiBusy === d.id
                 return h('div', { key: d.id, className: 'ops-dev' },
                   h('div', { className: 'ops-dev-top' },
                     h('span', { className: 'ops-dev-name', title: d.name }, d.name),
@@ -1127,6 +1261,15 @@ function DeviceManager(): ReactElement {
                   d.note ? h('div', { className: 'ops-dev-note', title: d.note }, d.note) : null,
                   h('div', { className: 'ops-dev-acts' },
                     h('button', { className: 'ops-btn primary sm', onClick: () => connectDevice(d), disabled: connectingId === d.id }, connectingId === d.id ? '连接中…' : '连接设备'),
+                    // m05288: opens the management UI in a real browser window and
+                    // logs in with the stored account. The password is filled in by
+                    // the host, so this button never has one to send.
+                    h('button', {
+                      className: 'ops-btn sm' + (wu?.status === 'ready' ? ' on' : ''),
+                      onClick: () => void webLogin(d),
+                      disabled: wuBusy,
+                      title: `打开 ${d.ip} 的 Web 管理界面并自动登录（用设备表里保存的账号密码）`,
+                    }, wuBusy ? '登录中…' : 'WebUI 登录'),
                     h('button', { className: 'ops-btn sm', onClick: () => openEdit(d) }, '编辑'),
                     h('button', {
                       className: 'ops-btn sm',
@@ -1134,7 +1277,17 @@ function DeviceManager(): ReactElement {
                       title: `以「${d.name}」的信息预填新增表单（含已保存的密码），点保存后才创建`,
                     }, '复制'),
                     h('button', { className: 'ops-btn sm plain danger', onClick: () => setRemoving(d) }, '删除'),
+                    // Only offered while a window is actually open: a close
+                    // control that appears unconditionally teaches the operator
+                    // to press a button that does nothing.
+                    wu ? h('button', {
+                      className: 'ops-btn sm plain',
+                      onClick: () => void webLoginClose(d),
+                      disabled: wuBusy,
+                      title: '关闭该设备的管理界面窗口',
+                    }, '关闭窗口') : null,
                   ),
+                  wu ? h(WebUiVerdict, { state: wu }) : null,
                 )
               })),
               totalPages > 1 && h('div', { className: 'ops-pager' },

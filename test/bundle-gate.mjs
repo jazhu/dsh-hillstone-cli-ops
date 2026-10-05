@@ -9,6 +9,13 @@ const pkgRoot = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/
 const client = readFileSync(new URL('../dist/client.js', import.meta.url), 'utf-8')
 const host = readFileSync(new URL('../dist/index.mjs', import.meta.url), 'utf-8')
 
+// esbuild emits `charset: ascii`, so the bundle carries every CJK string as
+// \uXXXX escapes. Decode once, up here, and let the checks below compare real
+// characters: hand-copying those escapes into a regex is how an assertion comes
+// to miss a string that was in the artefact all along, and how one of them once
+// silently passed on a string that was never built.
+const clientText = client.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+
 // Declared before any check runs. The negative assertions below increment it,
 // and a `bad++` that executes before this `let` initialises would throw a TDZ
 // ReferenceError instead of reporting the miss — the gate would die on exactly
@@ -134,6 +141,27 @@ const checks = [
   ['client  a parked intent is claimed by its own session only', /function takePendingReveal\(sessionId\)|takePendingReveal = function \(sessionId\)/, client],
   ['client  the body is told which session it belongs to', /OpsPage\(props = \{\}\)|OpsPage\(\{ ?sessionId ?\}|sessionId\?: string/, client],
   ['client  the reveal asks before it opens the tab', /requestRevealTerminal\(c\.originSessionId\)[\s\S]{0,400}?revealSidebar\?\.\(c\.originSessionId\)/, client],
+  // m05288 — WebUI login. The load-bearing facts are the ones that keep this
+  // from being a credential-into-a-page-of-soup mistake: the password is
+  // decrypted host-side and never crosses the bridge, one attempt only (the
+  // device starts demanding a captcha after a single failure, so a retry loop
+  // would be a guaranteed lockout), and the verdict is read off the login
+  // response rather than scraped off the DOM.
+  ['host    web login route', /\/web-login/, host],
+  ['host    web login close route', /\/web-login\/close/, host],
+  ['host    the password is decrypted host-side for the form', /decryptSecret\(/, host],
+  ['host    playwright is imported lazily, not at load time', /await import\(["']playwright["']\)|import\(["']playwright["']\)/, host],
+  ['host    the browser is launched with a persistent profile', /launchPersistentContext\(/, host],
+  ['host    the operator keeps the window, so no headless mode', /headless: false/, host],
+  ['host    self-signed device certs are tolerated', /ignoreHTTPSErrors: true/, host],
+  ['host    the verdict comes from the login response', /success === true|success === false/, host],
+  ['host    a captcha demand is a verdict, not a retry', /captcha/, host],
+  ['host    the web port falls back to 443', /DEFAULT_WEB_PORT = 443/, host],
+  ['client  a device card can ask for a WebUI login', /webLogin\(d\)|onClick: \(\) => void webLogin\(d\)/, clientText],
+  ['client  the button says what is happening', /登录中…/, clientText],
+  ['client  a captcha is labelled as work for a human, not a failure', /需人工完成/, clientText],
+  ['client  the close button only appears when a window is open', /关闭窗口/, clientText],
+  ['client  the card shows the verdict', /WebUiVerdict|ops-webui/, clientText],
 ]
 
 // m05105 — the manifest is what the loader reads BEFORE any code runs. It listed
@@ -159,11 +187,8 @@ if (!injectDrift) bad++
 
 // m05105 — the tab's guide text is the one description a user reads in the UI
 // before opening the panel, so it has to say what the panel does *now* rather
-// than what it did when the tab was registered. Match the shipped CJK directly:
-// esbuild emits `charset: ascii`, so the bundle carries \uXXXX escapes, and
-// hand-copying those escapes into a regex is how this check first came to lie
-// (it missed a string that was in the artefact all along).
-const clientText = client.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+// than what it did when the tab was registered. Match the shipped CJK directly
+// (see the clientText decode at the top of this file).
 const guideExplains = clientText.includes('管理 Hillstone / StoneOS 设备')
   && clientText.includes('自动切到终端页')
   && clientText.includes('连接审计日志')
