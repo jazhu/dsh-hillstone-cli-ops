@@ -512,8 +512,8 @@ const toolsCtx = {
 mod.apply(toolsCtx, { dataDir, apiPort: apiPort2, apiTokenEnabled: true })
 await waitPort(apiPort2)
 
-check('the agent tool surface is registered', registered.size >= 7, [...registered.keys()].join(','))
-for (const name of ['hillstone_list_devices', 'hillstone_open_terminal', 'hillstone_send_input', 'hillstone_get_output', 'hillstone_close_terminal', 'hillstone_list_sessions', 'hillstone_run_and_analyze']) {
+check('the agent tool surface is registered', registered.size >= 9, [...registered.keys()].join(','))
+for (const name of ['hillstone_list_devices', 'hillstone_open_terminal', 'hillstone_send_input', 'hillstone_get_output', 'hillstone_close_terminal', 'hillstone_list_sessions', 'hillstone_run_and_analyze', 'hillstone_scan_liveness', 'hillstone_web_login']) {
   check(`tool ${name} is available to the agent`, registered.has(name), [...registered.keys()].join(','))
 }
 // A ToolDefinition that breaks the contract does not throw at register time —
