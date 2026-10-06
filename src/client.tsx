@@ -339,18 +339,23 @@ const panelCss = `
 .ops-seg button:hover { color: var(--dsw-alias-label-primary, #e7e7ea); background: var(--dsw-alias-interactive-bg-hover, #ffffff10); }
 .ops-seg button.on { background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 18%, transparent); color: var(--dsw-alias-label-primary, #e7e7ea); font-weight: 500; box-shadow: 0 1px 2px 0 rgba(0,0,0,.18); }
 
-/* Buttons */
-.ops-btn { display: inline-flex; align-items: center; justify-content: center; gap: 4px; background: transparent; border: 1px solid var(--dsw-alias-border-l2, #3a414b); color: var(--dsw-alias-label-secondary, #cfd3d6); border-radius: var(--dsw-radius-sm, 8px); cursor: pointer; font-family: inherit; font-size: 13px; line-height: 20px; padding: 4px 12px; white-space: nowrap; transition: background var(--ds-transition-duration-fast, .1s) var(--ds-ease-in-out, ease), color var(--ds-transition-duration-fast, .1s) var(--ds-ease-in-out, ease), border-color var(--ds-transition-duration-fast, .1s) var(--ds-ease-in-out, ease); }
+/* Buttons read as surfaces, not as outlined words: a flat transparent fill is
+   easy to skip past in a rail full of them, so the base button gets the same
+   layer-3 surface the login buttons already use, and the accent variants tint
+   that surface instead of only tinting the text. */
+.ops-btn { display: inline-flex; align-items: center; justify-content: center; gap: 4px; background: var(--dsw-alias-bg-layer-3, #2c2c2e); border: 1px solid var(--dsw-alias-border-l2, #3a414b); color: var(--dsw-alias-label-secondary, #cfd3d6); border-radius: var(--dsw-radius-sm, 8px); cursor: pointer; font-family: inherit; font-size: 13px; line-height: 20px; padding: 4px 12px; white-space: nowrap; transition: background var(--ds-transition-duration-fast, .1s) var(--ds-ease-in-out, ease), color var(--ds-transition-duration-fast, .1s) var(--ds-ease-in-out, ease), border-color var(--ds-transition-duration-fast, .1s) var(--ds-ease-in-out, ease), box-shadow var(--ds-transition-duration-fast, .1s) var(--ds-ease-in-out, ease), transform var(--ds-transition-duration-fast, .1s) var(--ds-ease-in-out, ease); }
 .ops-btn:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover, #ffffff14); color: var(--dsw-alias-label-primary, #f9fafb); border-color: var(--dsw-alias-border-l4, #4a4d55); }
+.ops-btn:active:not(:disabled) { background: var(--dsw-alias-interactive-bg-active, #ffffff1f); border-color: var(--dsw-alias-border-l4, #4a4d55); transform: translateY(1px); }
+.ops-btn:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary, #4176e6); outline-offset: 1px; }
 .ops-btn:disabled { opacity: .45; cursor: default; }
 .ops-btn.sm { padding: 2px 10px; font-size: 12px; }
-.ops-btn.primary { color: var(--dsw-alias-state-business-primary, #4176e6); border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 40%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 10%, transparent); }
-.ops-btn.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 20%, transparent); color: var(--dsw-alias-state-business-primary, #4176e6); }
-.ops-btn.danger { color: var(--dsw-alias-state-error-primary, #f85149); border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f85149) 32%, transparent); }
-.ops-btn.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f85149) 12%, transparent); color: var(--dsw-alias-state-error-primary, #f85149); }
-.ops-btn.plain { border-color: transparent; color: var(--dsw-alias-label-tertiary, #9a9aa6); }
-.ops-btn.plain:hover:not(:disabled) { border-color: transparent; background: var(--dsw-alias-interactive-bg-hover, #ffffff14); color: var(--dsw-alias-label-primary, #f9fafb); }
-.ops-btn.on { color: var(--dsw-alias-state-business-primary, #4176e6); border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 40%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 12%, transparent); }
+.ops-btn.primary { color: var(--dsw-alias-state-business-primary, #4176e6); border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 42%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 14%, var(--dsw-alias-bg-layer-3, #2c2c2e)); }
+.ops-btn.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 24%, var(--dsw-alias-bg-layer-3, #2c2c2e)); color: var(--dsw-alias-state-business-primary, #4176e6); }
+.ops-btn.danger { color: var(--dsw-alias-state-error-primary, #f85149); border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f85149) 34%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f85149) 12%, var(--dsw-alias-bg-layer-3, #2c2c2e)); }
+.ops-btn.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f85149) 20%, var(--dsw-alias-bg-layer-3, #2c2c2e)); color: var(--dsw-alias-state-error-primary, #f85149); }
+.ops-btn.plain { background: transparent; border-color: transparent; color: var(--dsw-alias-label-tertiary, #9a9aa6); }
+.ops-btn.plain:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover, #ffffff14); border-color: transparent; color: var(--dsw-alias-label-primary, #f9fafb); }
+.ops-btn.on { color: var(--dsw-alias-state-business-primary, #4176e6); border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 40%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 12%, var(--dsw-alias-bg-layer-3, #2c2c2e)); }
 
 /* Form */
 .ops-field { display: block; margin-bottom: 12px; }
