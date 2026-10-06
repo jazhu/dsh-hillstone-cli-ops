@@ -2010,6 +2010,96 @@ function activate(ctx: ContextLike, config?: Partial<Config>): void {
               },
             }
             const unregisterList = registry.register(listDef)
+
+            // Probe one or all devices for TCP reachability — the exact check the
+            // card's status lamp runs. Returning it as data lets the agent read a
+            // device's online/offline state without eyeballing the panel, and lets
+            // it sweep every box at once before deciding what to connect to.
+            const livenessDef = {
+              name: 'hillstone_scan_liveness',
+              description:
+                '探测一台或全部 Hillstone 设备是否在线（TCP 端口可达性，与设备卡片上的状态灯用同一套探测）。' +
+                '参数：deviceId（可选，先用 hillstone_list_devices 获取；不给则探测全部已管理设备）。' +
+                '返回每台设备的 deviceId / ip / port / state（online=端口可达、offline=不可达）/ 可选 ms（握手耗时）与 error（失败原因）。' +
+                '注意：online 只代表「设备开机且 SSH 端口可达」，不代表已登录，也不代表账号密码有效。',
+              parameters: {
+                deviceId: { type: 'string', description: '目标设备 id；不给则探测全部已管理设备' },
+              },
+              output: toolOutput((v: any) => {
+                const rows = v.results ?? []
+                if (!rows.length) return '没有可探测的设备（或指定的 deviceId 不存在）。'
+                const lines = [`存活探测结果（共 ${rows.length} 台，online=端口可达）：`]
+                for (const r of rows) {
+                  const s = r.state === 'online' ? '在线' : r.state === 'offline' ? '离线' : '探测中'
+                  const extra = r.ms !== undefined ? ` ${r.ms}ms` : ''
+                  const err = r.error ? `（${r.error}）` : ''
+                  lines.push(`- ${r.deviceId}  ${r.ip}:${r.port}  ${s}${extra}${err}`)
+                }
+                return lines.join('\n')
+              }),
+              async execute(args: { deviceId?: string }) {
+                const all = [...store.devices.values()]
+                const list = args.deviceId ? all.filter((d) => d.id === args.deviceId) : all
+                if (args.deviceId && list.length === 0) return { ok: false, error: 'device not found' }
+                const results = await scanLiveness(list)
+                return { ok: true, results }
+              },
+            }
+            const unregisterLiveness = registry.register(livenessDef)
+
+            // Drive a device's management UI login headlessly — the same path the
+            // 「WebUI 登录」button uses. The verdict (ready/captcha/error) comes
+            // back as data so the agent can decide whether to hand off to a human,
+            // and the window, if any, is left open for the operator.
+            const webLoginDef = {
+              name: 'hillstone_web_login',
+              description:
+                '在浏览器中打开指定 Hillstone 设备的 Web 管理界面并用保存的凭据自动登录（与卡片上的「WebUI 登录」按钮同一套逻辑）。' +
+                '参数：deviceId（先用 hillstone_list_devices 获取）。' +
+                '返回 deviceId / url / status：ready=登录成功（窗口已打开，交由你继续操作）；captcha=设备要求图形验证码，请在打开的窗口里手动完成；' +
+                'error=页面打不开或浏览器无法启动。密码只在宿主侧解密并填入页面，不会回传。' +
+                '注意：登录失败不要重试，StoneOS 会在失败后要求图形验证码，重复自动尝试即使密码正确也会失败。',
+              parameters: {
+                deviceId: { type: 'string', required: true, description: '目标设备 id' },
+              },
+              output: toolOutput((v: any) => {
+                const statusMap: Record<string, string> = {
+                  ready: '登录成功，浏览器窗口已打开',
+                  captcha: '设备要求图形验证码，请在打开的窗口里手动完成',
+                  error: '登录失败',
+                  idle: '未尝试',
+                }
+                return [
+                  `设备 ${v.deviceId} 的 WebUI 登录：${statusMap[v.status] ?? v.status}`,
+                  v.url ? `地址：${v.url}` : '',
+                  v.message ? `原因：${v.message}` : '',
+                ]
+                  .filter(Boolean)
+                  .join('\n')
+              }),
+              async execute(args: { deviceId: string }) {
+                const device = store.devices.get(args.deviceId)
+                if (!device) return { ok: false, error: 'device not found' }
+                let password: string
+                try {
+                  password = decryptSecret(store.key, device.password)
+                } catch (e) {
+                  return { ok: false, error: `无法解密该设备的密码：${(e as Error).message}。请在编辑设备里重新设置密码。` }
+                }
+                try {
+                  const state = await webLogin(device, password, store.dir)
+                  return { ok: true, ...state }
+                } catch (e) {
+                  return { ok: false, error: (e as Error).message }
+                } finally {
+                  // Drop the plaintext as soon as it is no longer needed: it was a
+                  // local, never a field, so there is nothing else to clear.
+                  password = ''
+                }
+              },
+            }
+            const unregisterWebLogin = registry.register(webLoginDef)
+
             TOOL_NAMES.push(
               def.name,
               openDef.name,
@@ -2018,6 +2108,8 @@ function activate(ctx: ContextLike, config?: Partial<Config>): void {
               closeDef.name,
               sessionsDef.name,
               listDef.name,
+              livenessDef.name,
+              webLoginDef.name,
             )
             return () => {
               try {
@@ -2028,6 +2120,8 @@ function activate(ctx: ContextLike, config?: Partial<Config>): void {
                 unregisterClose?.()
                 unregisterSessions?.()
                 unregisterList?.()
+                unregisterLiveness?.()
+                unregisterWebLogin?.()
               } catch {
                 /* ignore */
               }

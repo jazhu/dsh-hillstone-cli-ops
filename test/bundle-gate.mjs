@@ -75,6 +75,8 @@ const checks = [
   ['host    agent tool: list sessions', /hillstone_list_sessions/, host],
   ['host    agent tool: get output', /hillstone_get_output/, host],
   ['host    agent tool: close terminal', /hillstone_close_terminal/, host],
+  ['host    agent tool: scan liveness', /hillstone_scan_liveness/, host],
+  ['host    agent tool: web login', /hillstone_web_login/, host],
   // DSH's ToolDefinition contract: a def missing `output.render` does not throw
   // at register time, it just never appears in Tool.listTools — so the plugin
   // looks healthy while every hillstone_* tool is invisible to the agent.
