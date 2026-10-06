@@ -351,6 +351,26 @@ gate. It replaces one shipped string in `dist/client.js`, confirms the gate's
 matching assertion flips to `MISS`, and restores the file byte-exact. An
 assertion that cannot be shown to fail is not coverage, it is decoration.
 
+### Screenshots
+
+The panel images in [`docs/插件介绍.html`](docs/插件介绍.html) are not mockups.
+`tools/shots/capture.mjs` renders the real `dist/client.js` in Chromium at the
+panel's actual right-rail width, against the real `dist/index.mjs` host and the
+same fake StoneOS the regression suite uses, seeded through the real
+`/ops-api`. Hand-drawn HTML drifts the moment the UI changes — the tab guide
+already had to be pinned by a gate assertion (m06703) for exactly that reason.
+
+```bash
+node tools/shots/capture.mjs        # writes docs/assets/*.png
+node tools/shots/check-page.mjs     # tags balanced, every asset exists and is referenced
+```
+
+`tools/shots/` installs its own `react` + `react-dom` (UMD, for the page) with
+**npm**, not pnpm: the repository root carries a `pnpm-workspace.yaml`, and
+pnpm treats a nested package as workspace-ineligible and silently builds nothing
+there. The host provides react at runtime, so the plugin itself externalises it;
+only this harness needs it on disk.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

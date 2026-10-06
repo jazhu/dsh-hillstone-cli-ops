@@ -275,6 +275,23 @@ agent 工具共享同一份 store。若为工具另起一个实例，工具拿�
 `dist/client.js` 里某一条已发布的字符串替换掉，确认门禁里对应那条断言翻成 `MISS`，然后把
 文件按字节原样还原。一条无法被证明会失败的断言不是覆盖率，只是装饰。
 
+### 截图
+
+[`docs/插件介绍.html`](docs/插件介绍.html) 里的面板图不是手绘稿。`tools/shots/capture.mjs`
+把真实的 `dist/client.js` 放进 Chromium，按面板实际所在的右栏宽度渲染，宿主是真实的
+`dist/index.mjs`，设备端是回归套件用的同一台假 StoneOS，fixture 走真实 `/ops-api` 灌进去。
+UI 一改，手绘的 HTML 就会漂——标签引导文案（m06703）正是因此才被门禁钉住。
+
+```bash
+node tools/shots/capture.mjs        # 写出 docs/assets/*.png
+node tools/shots/check-page.mjs     # 标签配平、每个素材都存在且被引用
+```
+
+`tools/shots/` 用 **npm** 装自己的 `react` + `react-dom`（UMD，供页面使用），不是 pnpm：
+仓库根有 `pnpm-workspace.yaml`，pnpm 会把嵌套目录判为不合格的 workspace 子包，
+然后**静默地什么都不装**。宿主在运行时提供 react，所以插件本身把它 external 掉了；
+只有这个工装需要在磁盘上真的有一份。
+
 ## 许可
 
 MIT —— 见 [LICENSE](LICENSE)。
