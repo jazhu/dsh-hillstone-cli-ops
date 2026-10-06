@@ -217,8 +217,18 @@ if (!injectDrift) bad++
 const guideExplains = clientText.includes('管理 Hillstone / StoneOS 设备')
   && clientText.includes('自动切到终端页')
   && clientText.includes('连接审计日志')
+  && clientText.includes('执行策略')
 console.log(`${guideExplains ? '  ok  ' : '  MISS'} client  the tab guide describes the current panel (m05105)`)
 if (!guideExplains) bad++
+
+// The 执行策略 tab shipped after the guide text was first written, and the
+// guide had already gone stale once (it still advertised only "device
+// management and an SSH terminal" after search, pagination, the liveness lamp
+// and the audit log existed). Assert the fourth tab by name so adding a tab
+// without describing it fails the build instead of shipping a lie.
+const guideNamesPolicyTab = clientText.includes('「执行策略」限定')
+console.log(`${guideNamesPolicyTab ? '  ok  ' : '  MISS'} client  the tab guide names the 执行策略 tab (m06703)`)
+if (!guideNamesPolicyTab) bad++
 
 // Assert the ABSENCE directly: every check above greps dist/, so a removed
 // feature can only be proven gone by looking for it. The SG-6000 answers

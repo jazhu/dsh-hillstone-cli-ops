@@ -1,8 +1,8 @@
 # dsh-hillstone-cli-ops
 
 一个 [DeepSeek Harness](https://github.com/deepseek-ai)（DSH）插件，把 Hillstone / StoneOS
-网络设备搬进 DSH 的右侧栏：管理设备、打开一个真实的 SSH 终端、查看每次连接的审计日志，
-同时给助手注册 7 个工具，让它自己就能做这些事。
+网络设备搬进 DSH 的右侧栏：管理设备、打开一个真实的 SSH 终端、查看每次连接的审计日志、
+写下助手不许打破的命令规则，同时给助手注册 9 个工具，让它自己就能做这些事。
 
 [English README](README.md)
 
@@ -13,23 +13,28 @@
 
 ## 你得到什么
 
-**右侧栏的一个「设备运维」标签页**，内含三个子标签：
+**右侧栏的一个「设备运维」标签页**，内含四个子标签：
 
 | 子标签 | 做什么 |
 | --- | --- |
 | **设备管理** | 设备的增删改查（名称 / IP / 账号 / 密码 / SSH 端口 / 设备类型 / Web 端口 / 备注）。新增、复制、编辑都走同一个弹窗。卡片名称那一行右侧是两条登录入口：**CLI 登录**（SSH 终端）与 **WebUI 登录**（浏览器）。名称前面有一盏状态灯，显示最近一次的存活检测结果：绿=端口可达、红=不可达，首次启动、还没检测过则不显示。 |
 | **终端** | 每条活动连接对应一个 xterm.js 终端。输入发给宿主，设备输出经 SSE 流回面板。新连接出现时面板直接切到「终端」，你落在实时会话上，而不是设备列表。 |
 | **日志** | 每次连接的审计记录：谁连了哪台设备、输入了什么、执行了哪些命令、会话何时因何结束。 |
+| **执行策略** | **由你**书写的规则：一个每天循环的时间窗口，绑定你自己填写的命令模式。当 agent 下发的命令落在窗口内又命中模式时，宿主在任何 SSH 流量发生之前拒绝它，并记录原因。完整语义见 [docs/执行策略.md](docs/执行策略.md)。 |
 
-**7 个 agent 工具**，让助手不必等你也能操作设备：
+**9 个 agent 工具**，让助手不必等你也能操作设备：
 
 `hillstone_list_devices`、`hillstone_open_terminal`、`hillstone_send_input`、
 `hillstone_get_output`、`hillstone_close_terminal`、`hillstone_list_sessions`、
-`hillstone_run_and_analyze`。
+`hillstone_run_and_analyze`、`hillstone_scan_liveness`、`hillstone_web_login`。
 
 `hillstone_run_and_analyze` 批量执行命令，把输出连同一句自然语言目标（「检查接口状态和 CPU
 负载」）交给宿主 LLM 分析。默认复用运维人员已经打开的终端会话，因此你可以在标签页里看着
 agent 干活；没有活动会话时它会退回到一次性 exec 通道。
+
+`hillstone_scan_liveness` 把每台设备的 TCP 可达性当作数据返回——与状态灯用的是同一套探测，
+因此助手不必去读面板就能分辨「设备离线」和「端口不可达」。`hillstone_web_login` 驱动设备的
+管理界面登录并返回结论（ready / captcha / error），遇到验证码时把窗口留给人工完成。
 
 ### WebUI 登录
 
@@ -143,6 +148,31 @@ loader 在任何代码运行之前读取的东西。客户端半边自己的 `ex
 而不是吐出一个替换字符。判定「游标太旧」的条件是 `since < dropped`——与一个不断增长的总长相比，
 会让任何新输出一到就看起来所有游标都过期了。
 
+### 执行策略约束的是 agent，不是运维人员本人
+
+网络设备上有一些命令，你绝不希望它在凌晨三点被执行——而下命令的正是助手。所以「执行策略」
+让你自己写这条规则：一个**每天循环的时间窗口**（留空=始终生效，`22:00`–`06:00` 可跨午夜），
+绑定**你自己填写的命令模式**。没有内置黑名单，宿主从不替你决定什么算危险。
+
+匹配是**词边界包含、大小写不敏感**。模式 `reload` 能命中 `reload`、`reload force`、
+`RELOAD now`，但不会命中 `reloading` 或 `firereload`。前缀匹配会过度拦截；正则则要求每个
+运维人员都去学一种语法。这是在「够用」与「不误伤」之间的取舍，而边界本身是 Unicode 感知的
+（`\p{L}` / `\p{N}`），所以在中日韩文本周围表现一致。
+
+有两个决定值得直说：
+
+- **只拦 agent 的入口。** `hillstone_run_and_analyze` 与 `hillstone_send_input` 在任何 SSH
+  流量之前检查策略，返回带策略名的 `blocked` 结论；而人类那条 `/conn/input` 路径——你，在
+  「终端」页里手敲——**刻意不检查**。一条连作者本人都绕不过去的规则，就是一条把作者自己锁在
+  设备外面的规则；策略约束的是自动化，而不是写规则的那个人。
+- **拒绝会留痕，且对设备零影响。** 拦截会写一条 `console.warn` 和一条带策略名与命中模式的
+  会话日志 `event`。任何东西都不会到达设备，因此没有「执行了一半」的状态需要收拾。
+
+拦截点位于 `runCommandVisible`（工具与 `/analyze` HTTP 路由共用）内部，以及
+`hillstone_send_input.execute` 的顶部——所以只有一处检查，而不是每个调用点各写一遍。策略
+落在 `policies.json`，与 `devices.json` 同目录、同一加密密钥，经既有的带 token 的回环 API
+暴露 `GET/POST/PUT/DELETE /ops-api/policies`。
+
 ### 违反契约的 ToolDefinition 不会抛错
 
 DSH 的 `ToolDefinition` 要求 `output.schema` 与 `output.render(args, value)`，并要求
@@ -236,8 +266,14 @@ node test/bundle-gate.mjs                       # 对构建产物做特征断言
 
 `test/terminal-regression.mjs` 会拿真实的 `dist/index.mjs` 对上一个自建的假 StoneOS（走真实
 `ssh2`），其中包含一个会在 ` --More--` 处停下、并**吞掉**在那里输入的任何东西的假分页器——
-与真机相同的失效模式。它还会起**第二个**宿主实例、配一个会录下注册内容的工具注册表，因为工具
-面才是 agent 真正用到的东西，而浏览器的 HTTP API 不是。
+与真机相同的失效模式。它只 apply 一次插件，并从**同一个**实例上捕获工具注册表——那个实例同时
+提供 HTTP API，这正是生产环境的形态：DSH 只调 `apply` 一次，`activate` 内部让回环服务与
+agent 工具共享同一份 store。若为工具另起一个实例，工具拿到的就会是**另一份**内存 store，
+经 HTTP 建的规则会被静默地永远送不到它们手里。
+
+`test/negctl-guide.mjs` 不在上面这条链里——它是对门禁本身的自检。它会把
+`dist/client.js` 里某一条已发布的字符串替换掉，确认门禁里对应那条断言翻成 `MISS`，然后把
+文件按字节原样还原。一条无法被证明会失败的断言不是覆盖率，只是装饰。
 
 ## 许可
 

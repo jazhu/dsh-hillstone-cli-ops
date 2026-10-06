@@ -2262,7 +2262,7 @@ export function apply(ctx: any): void {
                 order: 20,
                 title: () => '设备运维',
                 description: () =>
-                  '管理 Hillstone / StoneOS 设备，打开 SSH 终端并查看连接审计日志；连接成功后自动切到终端页，可直接看实时输出。',
+                  '管理 Hillstone / StoneOS 设备，打开 SSH 终端、查看连接审计日志，并用「执行策略」限定 agent 在你设定的时间窗口内不得执行你指定的命令；连接成功后自动切到终端页，可直接看实时输出。',
                 icon: IconComponent,
               },
             ],

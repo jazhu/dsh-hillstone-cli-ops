@@ -2,8 +2,9 @@
 
 A [DeepSeek Harness](https://github.com/deepseek-ai) (DSH) plugin that puts
 Hillstone / StoneOS network devices into the right sidebar: manage them, open a
-real SSH terminal, read the per-connection audit trail — and give the assistant
-seven tools so it can do all of that itself.
+real SSH terminal, read the per-connection audit trail, write the command rules
+the assistant is not allowed to break — and give the assistant nine tools so it
+can do all of that itself.
 
 The plugin is a two-half DSH plugin: a Node host half (SSH, encryption, session
 logs, the agent tools) and a browser client half (the sidebar tab and an xterm.js
@@ -15,25 +16,32 @@ terminal). Both are built from one `src/` tree.
 
 ## What you get
 
-**A 「设备运维」 tab in the right sidebar** with three sub-tabs:
+**A 「设备运维」 tab in the right sidebar** with four sub-tabs:
 
 | Tab | What it does |
 | --- | --- |
 | **设备管理** | CRUD devices (name / IP / account / password / SSH port / device type / web port / note). 新增, 复制 and 编辑 all run in one centred dialog. Each card's name row carries both ways onto the box: **CLI 登录** (SSH terminal) and **WebUI 登录** (browser), right-aligned. A lamp in front of the name shows the last liveness verdict: green reachable, red unreachable, nothing before the first scan. |
 | **终端** | One xterm.js terminal per live connection. Input goes to the host, device output streams back over SSE. A new connection switches this panel straight to 终端, so you land on the live session instead of the device list. |
 | **日志** | The per-connection audit trail: who connected to which device, what was typed, which commands were run, when and why the session ended. |
+| **执行策略** | Rules **you** write: a daily time window bound to command patterns you type in. When a command the assistant runs lands inside a window and matches a pattern, the host refuses it before any SSH traffic and records why. Full semantics in [docs/执行策略.md](docs/执行策略.md). |
 
-**Seven agent tools**, so the assistant can operate devices without you:
+**Nine agent tools**, so the assistant can operate devices without you:
 
 `hillstone_list_devices`, `hillstone_open_terminal`, `hillstone_send_input`,
 `hillstone_get_output`, `hillstone_close_terminal`, `hillstone_list_sessions`,
-`hillstone_run_and_analyze`.
+`hillstone_run_and_analyze`, `hillstone_scan_liveness`, `hillstone_web_login`.
 
 `hillstone_run_and_analyze` runs a batch of commands and hands the output to the
 host LLM with a natural-language task ("检查接口状态和 CPU 负载"). By default it
 reuses a terminal session an operator already has open, so you can watch the
 agent work in the tab; with no live session it falls back to a one-shot exec
 channel.
+
+`hillstone_scan_liveness` reports each device's TCP reachability as data — the
+same probe the status lamp runs, so the assistant can tell an offline box from
+an unreachable one without reading the panel. `hillstone_web_login` drives a
+device's management-UI login and returns the verdict (ready / captcha / error),
+leaving the window open for a human when a captcha demands one.
 
 ### WebUI 登录
 
@@ -176,6 +184,39 @@ the lead byte rather than producing a replacement glyph. The `since < dropped`
 test is what decides a cursor is too old — comparing against a moving total
 instead makes every cursor look stale the moment any new output arrives.
 
+### 执行策略 constrains the agent, not the operator
+
+A network device has commands you never want run at 3am — and the assistant is
+the thing that runs commands. So 「执行策略」 lets you write the rule yourself:
+a **daily recurring time window** (empty = always, and `22:00`–`06:00` wraps
+across midnight) bound to **command patterns you type in**. There is no
+built-in deny list; the host never decides for you what is dangerous.
+
+Matching is **word-boundary contains, case-insensitive**. The pattern `reload`
+catches `reload` and `reload force` and `RELOAD now`, but not `reloading` or
+`firereload`. A prefix match would over-block; a regex would need every operator
+to learn one. This is the middle that is hard to get wrong, and the boundary is
+Unicode-aware (`\p{L}` / `\p{N}`), so it behaves the same around CJK text.
+
+Two decisions are worth stating outright:
+
+- **Only the agent's entries are gated.** `hillstone_run_and_analyze` and
+  `hillstone_send_input` check the policy before any SSH traffic and return a
+  `blocked` verdict with the policy name. The human `/conn/input` path — you,
+  typing in the 终端 tab — is deliberately **not** checked. A policy whose author
+  cannot work around it is a policy that locks its author out of their own
+  device; the rule constrains automation, not the person who writes rules.
+- **A refusal is audited, and costs the device nothing.** The block writes a
+  `console.warn` and a session-log `event` carrying the policy name and the
+  matched pattern. Nothing reaches the box, so there is no half-applied state to
+  clean up.
+
+The gate lives inside `runCommandVisible` (shared by the tool and the `/analyze`
+HTTP route) and at the top of `hillstone_send_input.execute` — so it is one
+check, not one per call site. Policies live in `policies.json` beside
+`devices.json` under the same encryption key, with `GET/POST/PUT/DELETE
+/ops-api/policies` over the existing token-guarded loopback API.
+
 ### A ToolDefinition that breaks the contract does not throw
 
 DSH's `ToolDefinition` requires `output.schema` and `output.render(args, value)`
@@ -298,9 +339,17 @@ mtimes of `dist/*` against `src/**` + `build.mjs` and reports `MISS … (STALE)`
 `test/terminal-regression.mjs` boots the real `dist/index.mjs` against a
 self-hosted fake StoneOS over real `ssh2`, including a fake pager that stops at
 ` --More--` and *eats* whatever is typed there — the same failure mode as the
-real box. It also boots a second host instance with a recording tool registry,
-because the tool surface is what an agent actually uses, and the browser's HTTP
-API is not.
+real box. It applies the plugin **once** and captures the tool registry from the
+same instance that serves the HTTP API, because that is the shape production has:
+DSH calls `apply` a single time, and `activate` shares one store between the
+loopback server and the agent tools. Booting a second instance for the tools
+would hand the tools a *different* in-memory store from the one the API writes
+to, and a rule created over HTTP would silently never reach them.
+
+`test/negctl-guide.mjs` is not part of that chain — it is a self-check on the
+gate. It replaces one shipped string in `dist/client.js`, confirms the gate's
+matching assertion flips to `MISS`, and restores the file byte-exact. An
+assertion that cannot be shown to fail is not coverage, it is decoration.
 
 ## License
 
