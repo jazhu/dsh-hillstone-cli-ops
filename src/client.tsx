@@ -339,20 +339,19 @@ const panelCss = `
 .ops-seg button:hover { color: var(--dsw-alias-label-primary, #e7e7ea); background: var(--dsw-alias-interactive-bg-hover, #ffffff10); }
 .ops-seg button.on { background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 18%, transparent); color: var(--dsw-alias-label-primary, #e7e7ea); font-weight: 500; box-shadow: 0 1px 2px 0 rgba(0,0,0,.18); }
 
-/* Buttons read as surfaces, not as outlined words: a flat transparent fill is
-   easy to skip past in a rail full of them, so the base button gets the same
-   layer-3 surface the login buttons already use, and the accent variants tint
-   that surface instead of only tinting the text. */
-.ops-btn { display: inline-flex; align-items: center; justify-content: center; gap: 4px; background: var(--dsw-alias-bg-layer-3, #2c2c2e); border: 1px solid var(--dsw-alias-border-l2, #3a414b); color: var(--dsw-alias-label-secondary, #cfd3d6); border-radius: var(--dsw-radius-sm, 8px); cursor: pointer; font-family: inherit; font-size: 13px; line-height: 20px; padding: 4px 12px; white-space: nowrap; transition: background var(--ds-transition-duration-fast, .1s) var(--ds-ease-in-out, ease), color var(--ds-transition-duration-fast, .1s) var(--ds-ease-in-out, ease), border-color var(--ds-transition-duration-fast, .1s) var(--ds-ease-in-out, ease), box-shadow var(--ds-transition-duration-fast, .1s) var(--ds-ease-in-out, ease), transform var(--ds-transition-duration-fast, .1s) var(--ds-ease-in-out, ease); }
+/* Minimal buttons: the card already carries enough weight, so the buttons
+   stay quiet — a near-flat surface that only tints on hover, thin borders,
+   and accent fills dialled right down so the everyday verbs don't shout. */
+.ops-btn { display: inline-flex; align-items: center; justify-content: center; gap: 4px; background: color-mix(in srgb, var(--dsw-alias-bg-layer-3, #2c2c2e) 55%, transparent); border: 1px solid var(--dsw-alias-border-l2, #3a414b); color: var(--dsw-alias-label-secondary, #cfd3d6); border-radius: var(--dsw-radius-sm, 8px); cursor: pointer; font-family: inherit; font-size: 13px; line-height: 20px; padding: 4px 12px; white-space: nowrap; transition: background var(--ds-transition-duration-fast, .1s) var(--ds-ease-in-out, ease), color var(--ds-transition-duration-fast, .1s) var(--ds-ease-in-out, ease), border-color var(--ds-transition-duration-fast, .1s) var(--ds-ease-in-out, ease), box-shadow var(--ds-transition-duration-fast, .1s) var(--ds-ease-in-out, ease), transform var(--ds-transition-duration-fast, .1s) var(--ds-ease-in-out, ease); }
 .ops-btn:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover, #ffffff14); color: var(--dsw-alias-label-primary, #f9fafb); border-color: var(--dsw-alias-border-l4, #4a4d55); }
 .ops-btn:active:not(:disabled) { background: var(--dsw-alias-interactive-bg-active, #ffffff1f); border-color: var(--dsw-alias-border-l4, #4a4d55); transform: translateY(1px); }
 .ops-btn:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary, #4176e6); outline-offset: 1px; }
 .ops-btn:disabled { opacity: .45; cursor: default; }
 .ops-btn.sm { padding: 2px 10px; font-size: 12px; }
-.ops-btn.primary { color: var(--dsw-alias-state-business-primary, #4176e6); border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 42%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 14%, var(--dsw-alias-bg-layer-3, #2c2c2e)); }
-.ops-btn.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 24%, var(--dsw-alias-bg-layer-3, #2c2c2e)); color: var(--dsw-alias-state-business-primary, #4176e6); }
-.ops-btn.danger { color: var(--dsw-alias-state-error-primary, #f85149); border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f85149) 34%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f85149) 12%, var(--dsw-alias-bg-layer-3, #2c2c2e)); }
-.ops-btn.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f85149) 20%, var(--dsw-alias-bg-layer-3, #2c2c2e)); color: var(--dsw-alias-state-error-primary, #f85149); }
+.ops-btn.primary { color: var(--dsw-alias-state-business-primary, #4176e6); border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 30%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 8%, transparent); }
+.ops-btn.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 14%, transparent); color: var(--dsw-alias-state-business-primary, #4176e6); }
+.ops-btn.danger { color: var(--dsw-alias-state-error-primary, #f85149); border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f85149) 24%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f85149) 7%, transparent); }
+.ops-btn.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f85149) 13%, transparent); color: var(--dsw-alias-state-error-primary, #f85149); }
 .ops-btn.plain { background: transparent; border-color: transparent; color: var(--dsw-alias-label-tertiary, #9a9aa6); }
 .ops-btn.plain:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover, #ffffff14); border-color: transparent; color: var(--dsw-alias-label-primary, #f9fafb); }
 .ops-btn.on { color: var(--dsw-alias-state-business-primary, #4176e6); border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 40%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 12%, var(--dsw-alias-bg-layer-3, #2c2c2e)); }
@@ -433,14 +432,15 @@ const panelCss = `
 /* m05847 — the two ways in, parked on the name row so the card opens with how
    to get onto the box instead of with record-management verbs. */
 .ops-dev-logins { display: flex; align-items: center; gap: 6px; flex: none; margin-left: auto; }
-.ops-btn.login { gap: 5px; padding: 4px 11px; font-size: 12px; line-height: 18px; font-weight: 500; background: var(--dsw-alias-bg-layer-3, #2c2c2e); border-color: var(--dsw-alias-border-l2, #3a414b); box-shadow: var(--dsw-shadow-lv1, 0 2px 4px 0 rgba(0,0,0,.05)); }
+.ops-btn.login { gap: 5px; padding: 4px 11px; font-size: 12px; line-height: 18px; font-weight: 500; background: color-mix(in srgb, var(--dsw-alias-bg-layer-3, #2c2c2e) 55%, transparent); border-color: var(--dsw-alias-border-l2, #3a414b); }
 .ops-btn.login:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover, #ffffff14); border-color: var(--dsw-alias-border-l4, #4a4d55); }
 .ops-btn.login svg { flex: none; opacity: .9; }
-/* The CLI path is the everyday one, so it keeps the accent; WebUI is the
-   slower browser-bound route and stays neutral until it succeeds. Needed
-   explicitly because .login sets a background that would otherwise win over
-   .primary on equal specificity. */
-.ops-btn.login.cli { color: var(--dsw-alias-state-business-primary, #4176e6); border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 40%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 14%, var(--dsw-alias-bg-layer-3, #2c2c2e)); }
+/* The CLI path is the everyday one, so it keeps the faintest accent tint at
+   rest and deepens on hover; WebUI stays neutral. Needed explicitly because
+   .login sets a background that would otherwise win over .primary on equal
+   specificity. */
+.ops-btn.login.cli { color: var(--dsw-alias-state-business-primary, #4176e6); border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 32%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 8%, transparent); }
+.ops-btn.login.cli:hover:not(:disabled) { background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 14%, transparent); border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 48%, transparent); }
 .ops-btn.login.cli:hover:not(:disabled) { background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 24%, var(--dsw-alias-bg-layer-3, #2c2c2e)); border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 55%, transparent); }
 /* m05915 — the liveness verdict as a lamp, not as a word. Nothing renders
    before the first scan: a lamp that is merely unlit would read as a verdict,
