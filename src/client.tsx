@@ -378,6 +378,13 @@ const panelCss = `
 .ops-textarea { resize: vertical; min-height: 96px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; line-height: 19px; }
 .ops-form-hint { margin-top: 10px; font-size: 11.5px; line-height: 18px; color: var(--dsw-alias-label-caption, #81858c); }
 
+/* What the 执行策略 tab is FOR, shown once above the list.
+   Without it the tab reads as another settings page: the operator cannot tell
+   from "3 条策略" that these rules are aimed at the agent, not at the panel. */
+.ops-intro { margin: 0 0 12px; padding: 11px 13px; border: 1px solid var(--dsw-alias-border-l2, #2a2a36); border-radius: var(--dsw-radius-sm, 6px); background: var(--dsw-alias-bg-layer-1, #1e1f23); font-size: 12px; line-height: 19px; color: var(--dsw-alias-label-secondary, #c9c9cf); }
+.ops-intro b { color: var(--dsw-alias-label-primary, #f9fafb); font-weight: 500; }
+.ops-intro .ops-intro-scope { display: block; margin-top: 5px; color: var(--dsw-alias-label-tertiary, #9a9aa6); }
+
 /* Device dialog (新增 / 编辑 / 复制 / 删除确认 / 日志明细).
    The right rail is only a few hundred px wide, so an inline form and the device
    list cannot share it; every device edit happens in a dialog instead. OpsModal
@@ -1949,7 +1956,68 @@ function TerminalTab(): ReactElement {
 // enabled policy matches it (word-boundary substring) for the current time.
 // This tab is the only editor; the host's /ops-api/policies CRUD is the store.
 
-/** Render a policy's window as a short human phrase (no zone detail). */
+/**
+ * Window options for the two time dropdowns, in 15-minute steps (m09323).
+ *
+ * The host parses any "HH:MM" (`HHMM_RE` in index.ts), so these are the values
+ * the UI offers, not the values the host accepts — a policy written by hand over
+ * HTTP can still carry 09:07 and the host will honour it. We step by 15 because
+ * that is the smallest gap that can express a real "工作日夜间" or "午休时段"
+ * window without turning the list into 1441 rows.
+ *
+ * `''` is the empty option and it is NOT the same as '00:00': an empty window
+ * means the policy applies every minute of every day, while 00:00 is a bound.
+ */
+const TIME_STEP_MINUTES = 15
+const TIME_OPTIONS: readonly string[] = (() => {
+  const out: string[] = ['']
+  for (let m = 0; m < 24 * 60; m += TIME_STEP_MINUTES) {
+    const hh = String(Math.floor(m / 60)).padStart(2, '0')
+    const mm = String(m % 60).padStart(2, '0')
+    out.push(`${hh}:${mm}`)
+  }
+  return out
+})()
+
+/**
+ * The value a `<select>` must carry for a stored window bound.
+ *
+ * A policy created over HTTP can hold any minute the host's HHMM_RE accepts,
+ * including 09:07, which is not one of TIME_OPTIONS. Snapping it to the nearest
+ * 15-minute step would make saving an unrelated edit silently move the window —
+ * so instead the stored value is preserved in the state and an extra option is
+ * rendered for it. The operator sees the real bound and a save round-trips
+ * unchanged.
+ */
+function windowValue(stored: string): string {
+  const s = (stored || '').trim()
+  if (!s || TIME_OPTIONS.includes(s)) return s
+  return OFF_GRID_OPTION_PREFIX + s
+}
+
+/** Sentinel prefix for the injected option; never a valid HH:MM. */
+const OFF_GRID_OPTION_PREFIX = 'keep:'
+
+/** The extra <option> needed when a stored bound is off the 15-minute grid. */
+function offGridOption(stored: string, label: string): ReactElement | null {
+  const s = (stored || '').trim()
+  if (!s || TIME_OPTIONS.includes(s)) return null
+  return h('option', { key: OFF_GRID_OPTION_PREFIX + s, value: OFF_GRID_OPTION_PREFIX + s }, `${label} ${s}（非整刻度）`)
+}
+
+/** Strip the sentinel back off, so state always holds a plain HH:MM (or ''). */
+function unwindowValue(v: string): string {
+  return v.startsWith(OFF_GRID_OPTION_PREFIX) ? v.slice(OFF_GRID_OPTION_PREFIX.length) : v
+}
+
+/**
+ * Render a policy's window as a short human phrase (no zone detail).
+ *
+ * A window can legitimately hold a minute the dropdown never offers (someone
+ * PUT it over HTTP), so an unmatched value is shown verbatim rather than
+ * snapped to the nearest step — silently rewriting someone's 09:07 to 09:00
+ * would be worse than showing the odd value.
+ */
 function describeWindow(win?: PolicyWindow): string {
   if (!win || (!win.start && !win.end)) return '始终生效'
   const s = win.start || '00:00'
@@ -1962,17 +2030,24 @@ interface PolicyForm {
   enabled: boolean
   start: string
   end: string
-  timezone: string
   commands: string
   note: string
 }
+
+// The zone is not editable (m09323): policy windows are read by whoever is on
+// shift in this office, and Asia/Shanghai is that zone. Keeping a text box for
+// it meant two failure modes — a typo like "Asia/ShangHai" that silently falls
+// back to host-local, and a value nobody can tell apart from the default. The
+// host still reads `window.timezone` and still honours whatever is stored, so an
+// existing policy written in another zone keeps working; this only removes the
+// ability to create a new one by hand here.
+const POLICY_TIMEZONE = 'Asia/Shanghai'
 
 const EMPTY_POLICY: PolicyForm = {
   name: '',
   enabled: true,
   start: '',
   end: '',
-  timezone: 'Asia/Shanghai',
   commands: '',
   note: '',
 }
@@ -2013,7 +2088,6 @@ function PolicyManager(): ReactElement {
       enabled: p.enabled,
       start: p.window?.start || '',
       end: p.window?.end || '',
-      timezone: p.window?.timezone || 'Asia/Shanghai',
       commands: (p.commands || []).join('\n'),
       note: p.note || '',
     })
@@ -2027,12 +2101,16 @@ function PolicyManager(): ReactElement {
       setFormError('策略名称与至少一个命令模式必填')
       return
     }
+    const start = form.start.trim()
+    const end = form.end.trim()
     const payload = {
       name: form.name.trim(),
       enabled: form.enabled,
-      window: form.start.trim() || form.end.trim()
-        ? { start: form.start.trim(), end: form.end.trim(), timezone: form.timezone.trim() || 'Asia/Shanghai' }
-        : undefined,
+      // A window needs at least one bound. `start === end` means "always" to a
+      // reader (00:00–00:00 looks like a bug), and the host agrees in effect:
+      // [start, end) with equal bounds is an empty range, so it would block
+      // nothing while LOOKING armed. Say 始终生效 instead.
+      window: start || end ? { start, end, timezone: POLICY_TIMEZONE } : undefined,
       commands,
       note: form.note.trim() || undefined,
     }
@@ -2082,13 +2160,22 @@ function PolicyManager(): ReactElement {
         h('button', { className: 'ops-btn primary', onClick: openCreate, disabled: busy }, '+ 新增策略'),
       ),
     ),
+    // The purpose line (m09323). It names the constrained party — the agent —
+    // and the two entry points, because "限制哪些命令" reads as a panel-wide
+    // filter until you know the operator's own terminal is untouched by design.
+    h('div', { className: 'ops-intro' },
+      h('b', null, '执行策略用于限制 agent 调用运维工具时执行命令。'),
+      '每条策略 = 一个时间窗口 + 一组命令模式；命中即拒绝，不下发到设备。',
+      h('span', { className: 'ops-intro-scope' },
+        '拦截点：hillstone_run_and_analyze、hillstone_send_input。你在终端里手动敲的命令不受影响。'),
+    ),
     msg && h('div', { className: 'ops-msg ' + (msg.kind === 'ok' ? 'ok' : 'err') }, h('code', null, msg.text)),
     loading && policies.length === 0
       ? h('div', { className: 'ops-loading' }, '加载中…')
       : policies.length === 0
         ? h('div', { className: 'ops-empty' },
             h('b', null, '还没有执行策略'),
-            '点击右上角「+ 新增策略」创建规则：设置时间窗口并填入要限制的命令（每行一个）。命中策略的命令在执行时会被拒绝。',
+            '点击右上角「+ 新增策略」创建规则：选择时间窗口并填入要限制的命令（每行一个）。命中策略的命令在 agent 调用运维工具时会被拒绝。',
           )
         : h('div', { className: 'ops-list' }, policies.map((p) =>
             h('div', { key: p.id, className: 'ops-dev' },
@@ -2142,16 +2229,20 @@ function PolicyManager(): ReactElement {
             ),
           ),
           h('label', { className: 'ops-field' },
-            h('span', { className: 'ops-label' }, '开始时间', h('i', null, 'HH:MM，留空为 00:00')),
-            h('input', { className: 'ops-input', value: form.start, placeholder: '22:00', onChange: (e: any) => setForm({ ...form, start: e.target.value }) }),
+            h('span', { className: 'ops-label' }, '开始时间', h('i', null, '不限下界')),
+            h('select', {
+              className: 'ops-input ops-select',
+              value: windowValue(form.start),
+              onChange: (e: any) => setForm({ ...form, start: unwindowValue(e.target.value) }),
+            }, offGridOption(form.start, '自') ?? null, TIME_OPTIONS.map((t) => h('option', { key: t || 'any', value: t }, t || '不限'))),
           ),
           h('label', { className: 'ops-field' },
-            h('span', { className: 'ops-label' }, '结束时间', h('i', null, 'HH:MM，留空为 24:00')),
-            h('input', { className: 'ops-input', value: form.end, placeholder: '06:00', onChange: (e: any) => setForm({ ...form, end: e.target.value }) }),
-          ),
-          h('label', { className: 'ops-field', style: { gridColumn: '1 / -1' } },
-            h('span', { className: 'ops-label' }, '时区', h('i', null, '默认 Asia/Shanghai')),
-            h('input', { className: 'ops-input', value: form.timezone, placeholder: 'Asia/Shanghai', onChange: (e: any) => setForm({ ...form, timezone: e.target.value }) }),
+            h('span', { className: 'ops-label' }, '结束时间', h('i', null, '不限上界')),
+            h('select', {
+              className: 'ops-input ops-select',
+              value: windowValue(form.end),
+              onChange: (e: any) => setForm({ ...form, end: unwindowValue(e.target.value) }),
+            }, offGridOption(form.end, '自') ?? null, TIME_OPTIONS.map((t) => h('option', { key: t || 'any', value: t }, t || '不限'))),
           ),
           h('label', { className: 'ops-field', style: { gridColumn: '1 / -1' } },
             h('span', { className: 'ops-label' }, '命令模式', h('i', null, '每行一个，词边界匹配')),
@@ -2162,7 +2253,7 @@ function PolicyManager(): ReactElement {
             h('input', { className: 'ops-input', value: form.note, placeholder: '可选', onChange: (e: any) => setForm({ ...form, note: e.target.value }) }),
           ),
         ),
-        h('div', { className: 'ops-form-hint' }, '时间窗口为空表示始终生效；命令按词边界包含匹配（如 "reload" 命中 "reload force"，但不命中 "reloading"）。'),
+        h('div', { className: 'ops-form-hint' }, '时间窗口为空表示始终生效，步进 15 分钟，时区固定 Asia/Shanghai。命令按词边界包含匹配（如 "reload" 命中 "reload force"，但不命中 "reloading"）。'),
       ),
     }),
     removing && h(ConfirmDialog, {

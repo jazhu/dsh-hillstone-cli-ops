@@ -187,6 +187,16 @@ const checks = [
   ['client  policy editor saves', /api\(`\/policies\/\$\{editing\.id\}`|api\(\`\/policies\/\$\{editing\.id\}\`/, client],
   ['client  the tab says what it does', /还没有执行策略/, clientText],
   ['client  the editor explains the match rule', /词边界包含匹配/, clientText],
+  // m09323 — the three UI changes. Asserted separately because each one is a
+  // decision that can silently rot back: a select can turn into a free-text box,
+  // a removed field can come back, and a purpose line can drift into describing
+  // the panel instead of the agent.
+  ['client  window bounds are dropdowns, not free text', /TIME_OPTIONS/, client],
+  ['client  the time options step by 15 minutes', /TIME_STEP_MINUTES = 15/, client],
+  ['client  an off-grid stored bound is preserved', /windowValue\(|offGridOption\(/, client],
+  ['client  the zone is fixed, not editable', /POLICY_TIMEZONE = ["']Asia\/Shanghai["']/, client],
+  ['client  the tab names what it limits', /执行策略用于限制 agent 调用运维工具时执行命令/, clientText],
+  ['client  the tab names the two gated entry points', /hillstone_run_and_analyze、hillstone_send_input/, clientText],
 ]
 
 // m05105 — the manifest is what the loader reads BEFORE any code runs. It listed
@@ -309,6 +319,17 @@ for (const [name, hit] of [
   // m04040's StatusBadge left the card: the CLI button now says 连接中… itself,
   // and two indicators of one fact on a 400px row is noise.
   ['client  the card no longer stacks a connecting badge (m05847)', /connectingId === d\.id \? h\(StatusBadge/.test(client)],
+  // m09323 — the 时区 text box is gone from the policy editor. Match the removed
+  // LABEL, not the word: the fixed-zone rationale is spelled out in a comment
+  // right above the constant and in the README, so a blanket /timezone/ would
+  // fire on those and make this check useless. Same trap as m04031's `duplicate`.
+  ['client  the policy form has no 时区 input (m09323)', /'时区'/.test(clientSrc)],
+  // …and the two window fields are <select>, not <input>. In THIS list a truthy
+  // hit means FAILURE, so each entry states the bad condition directly. Anchor on
+  // the control itself — the comment above TIME_OPTIONS still says "input" while
+  // explaining why the box went away, so a blanket /h\('input'/ is useless here.
+  ['client  the window bounds are still <input> (m09323)', /h\('input'[^\n]*value: form\.(start|end)/.test(clientSrc)],
+  ['client  the HH:MM placeholders came back (m09323)', /placeholder: '22:00'|placeholder: '06:00'/.test(clientSrc)],
 ]) {
   console.log(`${hit ? '  MISS' : '  ok  '} ${name}`)
   if (hit) bad++

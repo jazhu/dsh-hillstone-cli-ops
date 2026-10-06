@@ -437,8 +437,7 @@
         <tbody>
           <tr><td>策略名称</td><td>展示用，例如「夜间冻结高危命令」</td></tr>
           <tr><td>启用</td><td>停用后整条失效，但仍保留在列表里</td></tr>
-          <tr><td>开始 / 结束时间</td><td><code>HH:MM</code>，留空=始终生效；支持跨午夜（<code>22:00</code>–<code>06:00</code>）</td></tr>
-          <tr><td>时区</td><td>IANA 或 <code>±HH:MM</code>，默认 <code>Asia/Shanghai</code></td></tr>
+          <tr><td>开始 / 结束时间</td><td>下拉选择，步进 15 分钟；不限=始终生效；支持跨午夜（<code>22:00</code>–<code>06:00</code>）</td></tr>
           <tr><td>命令模式</td><td>每行一个，<b>词边界包含</b>匹配</td></tr>
           <tr><td>备注</td><td>可选，展示在列表里，方便回忆规则意图</td></tr>
         </tbody>
@@ -446,6 +445,7 @@
     </div>
     <p style="margin-top:14px;font-size:13.5px;color:var(--label-caption)">
       窗口只支持<b>每天循环</b>，不支持按星期几或具体日期——绝大多数「冻结窗口」都是日级的。
+      时区固定 <code>Asia/Shanghai</code>，界面上不再提供输入框。
       多条策略之间<b>叠加</b>：任意一条已启用的策略命中，命令就被拒绝。
     </p>
 
@@ -502,7 +502,7 @@
         <figcaption><b>策略列表</b>　时间窗口摘要、启停开关、命令模式标签；停用的策略保留但不生效</figcaption>
       </figure>
       <figure class="shot">
-        <img src="assets/07-新增策略.png" alt="新增策略表单：策略名称、启用开关、开始与结束时间、时区、命令模式多行输入、备注" loading="lazy" />
+        <img src="assets/07-新增策略.png" alt="新增策略表单：策略名称、启用开关、开始与结束时间下拉（15 分钟步进）、命令模式多行输入、备注" loading="lazy" />
         <figcaption><b>新增策略</b>　命令模式每行一个，脚注直接写明词边界匹配的含义</figcaption>
       </figure>
     </div>

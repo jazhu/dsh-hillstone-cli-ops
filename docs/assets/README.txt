@@ -10,8 +10,8 @@ seeded through the real /ops-api. The four tabs are:
   03-终端.png        a live xterm session
   04-日志审计.png    the connection log list
   05-日志明细.png    one session's entries, raw keystrokes collapsed
-  06-执行策略.png    the policy list
-  07-新增策略.png    the new-policy dialog
+  06-执行策略.png    the policy list, under the purpose line that names the agent
+  07-新增策略.png    the new-policy dialog (15-minute dropdowns, fixed zone)
 
 To refresh them, run `node tools/shots/capture.mjs` from the repository root
 (build first — the harness screenshots dist/client.js, not src/). The device
