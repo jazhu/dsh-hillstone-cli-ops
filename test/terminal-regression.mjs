@@ -182,8 +182,6 @@ mkdirSync(dataDir, { recursive: true })
 
 // Take a free port first: a running DSH already owns 18783.
 const apiPort = await freePort()
-// A second instance needs its own port to register the tool surface.
-const apiPort2 = await freePort()
 
 const mod = await import(HOST_BUNDLE)
 /** The URL rule, re-exported by the host bundle (m05288) so it can be proven
@@ -192,10 +190,19 @@ const webLoginUrl = mod.webLoginUrl
 /** Mirrors the host's per-entry text cap; the assertion needs the real number,
  *  and re-declaring it here is what makes the test a specification. */
 const MAX_TEXT = 4096
+// Production calls apply ONCE: the single activation opens the loopback HTTP
+// server AND registers the agent tools onto the SAME store. Driving both from
+// one ctx (rather than two apply() calls) is what keeps a policy created over
+// HTTP visible to the run_and_analyze tool — exactly the product's real shape.
+const registered = new Map()
 const ctx = {
   logger: { info: () => {}, warn: (m) => console.error('[host warn]', String(m)) },
-  inject: () => undefined,
-  effect: () => undefined,
+  inject: (deps, cb) => {
+    if (Array.isArray(deps) && deps.includes('tools')) {
+      cb({ effect: (fn) => fn(), tools: { register: (def) => { registered.set(def.name, def); return () => registered.delete(def.name) } } })
+    }
+  },
+  effect: (fn) => fn(),
 }
 mod.apply(ctx, { dataDir, apiPort, apiTokenEnabled: true })
 await waitPort(apiPort)
@@ -499,19 +506,6 @@ const pagedDevice = await j('/devices', {
   body: { name: 'probe-pager', ip: '127.0.0.1', port: sshPort, account: 'probe', password: PASSWORD },
 })
 
-const registered = new Map()
-const toolsCtx = {
-  logger: { info: () => {}, warn: (m) => console.error('[host warn]', String(m)) },
-  effect: (fn) => fn(),
-  inject: (deps, cb) => {
-    if (Array.isArray(deps) && deps.includes('tools')) {
-      cb({ effect: (fn) => fn(), tools: { register: (def) => { registered.set(def.name, def); return () => registered.delete(def.name) } } })
-    }
-  },
-}
-mod.apply(toolsCtx, { dataDir, apiPort: apiPort2, apiTokenEnabled: true })
-await waitPort(apiPort2)
-
 check('the agent tool surface is registered', registered.size >= 9, [...registered.keys()].join(','))
 for (const name of ['hillstone_list_devices', 'hillstone_open_terminal', 'hillstone_send_input', 'hillstone_get_output', 'hillstone_close_terminal', 'hillstone_list_sessions', 'hillstone_run_and_analyze', 'hillstone_scan_liveness', 'hillstone_web_login']) {
   check(`tool ${name} is available to the agent`, registered.has(name), [...registered.keys()].join(','))
@@ -773,6 +767,52 @@ check('closing a window that was never opened succeeds but reports closed:false'
 const closeNoId = await j('/web-login/close', { method: 'POST', body: {} })
 check('close without a deviceId is a 400, not a silent no-op',
   closeNoId.ok === false && closeNoId.error?.code === 'bad-request', JSON.stringify(closeNoId).slice(0, 200))
+
+// m06703/m06704 — execution policy. A user-authored rule (here: block "reload"
+// for all time) must stop a command at the host, before it ever reaches the
+// device, and must record a blocked verdict instead of executing. We prove the
+// device was truly untouched by asserting the fake pty never received "reload".
+const ptyBefore = ptyReceived.join('')
+let policy = await j('/policies', {
+  method: 'POST',
+  body: { name: 'regression-freeze-reload', enabled: true, commands: ['reload'] },
+})
+check('policy can be created via the API', policy.ok === true && !!policy.policy?.id, JSON.stringify(policy).slice(0, 200))
+const policyId = policy.policy.id
+
+// The agent-facing path: run_and_analyze over a command the policy forbids.
+const blocked = await registered.get('hillstone_run_and_analyze').execute({
+  deviceId,
+  commands: ['reload'],
+  task: 'regression: must be blocked by policy',
+})
+const blockedResult = (blocked.results || [])[0]
+check('run_and_analyze reports the command as blocked', blockedResult?.blocked === true, JSON.stringify(blockedResult).slice(0, 200))
+check('a blocked command carries the policy name', (blockedResult?.blockReason ?? '') === 'regression-freeze-reload', JSON.stringify(blockedResult).slice(0, 200))
+check('a blocked command never reaches the device (pty untouched)',
+  ptyReceived.join('').slice(ptyBefore.length).toLowerCase().includes('reload') === false,
+  `pty tail=${JSON.stringify(ptyReceived.join('').slice(ptyBefore.length).slice(-80))}`)
+
+// The human path is intentionally NOT gated: a command typed in the terminal tab
+// is the policy author themselves, so /conn/input must still pass through.
+// Open a fresh connection so the verdict does not depend on a session a prior
+// case may have closed.
+const humanConn = await j('/connect', { method: 'POST', body: { deviceId, cols: 120, rows: 40 } })
+const humanConnId = humanConn.connection.connId
+ptyReceived.length = 0
+await j('/conn/input', { method: 'POST', body: { connId: humanConnId, data: 'reload\r' } })
+await new Promise((r) => setTimeout(r, 400))
+check('the human terminal path is not gated by policy',
+  ptyReceived.join('').toLowerCase().includes('reload'),
+  JSON.stringify(ptyReceived.join('').slice(-40)))
+await j(`/conn/${humanConnId}`, { method: 'DELETE' }).catch(() => {})
+
+// Editing + deleting the rule both have to round-trip, so a stale rule cannot
+// silently keep blocking after the operator lifts it.
+const edited = await j(`/policies/${policyId}`, { method: 'PUT', body: { name: 'regression-freeze-reload', enabled: false, commands: ['reload'] } })
+check('policy can be edited via the API', edited.ok === true && edited.policy?.enabled === false, JSON.stringify(edited).slice(0, 200))
+const del = await j(`/policies/${policyId}`, { method: 'DELETE' })
+check('policy can be deleted via the API', del.ok === true && !!del.policyId, JSON.stringify(del).slice(0, 200))
 
 console.log(`\n${pass} passed, ${fail} failed`)
 sshServer.close()

@@ -50,7 +50,7 @@ import { FitAddon } from 'xterm-addon-fit'
 // into <head> at runtime, because the harness does not expose xterm as a resolvable
 // client module and we cannot rely on a separately-served stylesheet asset.
 import xtermCss from 'xterm/css/xterm.css'
-import type { DeviceDTO, ConnectionInfo, DeviceType, DeviceLiveness, LogEntry, SessionLog, SessionLogDetail, WebLoginState, WebLoginStatus } from './types.ts'
+import type { DeviceDTO, ConnectionInfo, DeviceType, DeviceLiveness, LogEntry, SessionLog, SessionLogDetail, WebLoginState, WebLoginStatus, ExecPolicy, PolicyWindow } from './types.ts'
 import { DEVICE_TYPES, DEVICE_TYPE_LABELS } from './types.ts'
 
 // Inject xterm's stylesheet exactly once so the terminal renders correctly.
@@ -365,6 +365,18 @@ const panelCss = `
 .ops-input:hover { border-color: var(--dsw-alias-border-l4, #4a4d55); }
 .ops-input:focus { border-color: var(--dsw-alias-state-business-primary, #4176e6); background: var(--dsw-alias-bg-layer-1, #1e1f23); }
 .ops-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+
+/* Execution-policy form bits (执行策略). The switch is a label-wrapped checkbox
+   so the OS keeps the a11y semantics; the visible track is pure CSS. */
+.ops-switch { display: inline-flex; align-items: center; cursor: pointer; }
+.ops-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.ops-switch-track { position: relative; width: 38px; height: 22px; border-radius: 999px; background: var(--dsw-alias-bg-layer-3, #2c2c2e); border: 1px solid var(--dsw-alias-border-l4, #4a4d55); transition: background var(--ds-transition-duration-fast, .1s) var(--ds-ease-in-out, ease), border-color var(--ds-transition-duration-fast, .1s) var(--ds-ease-in-out, ease); }
+.ops-switch-track::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--dsw-alias-label-secondary, #cfd3d6); transition: transform var(--ds-transition-duration-fast, .1s) var(--ds-ease-in-out, ease), background var(--ds-transition-duration-fast, .1s) var(--ds-ease-in-out, ease); }
+.ops-switch input:checked + .ops-switch-track { background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #22c55e) 36%, transparent); border-color: var(--dsw-alias-state-success-primary, #22c55e); }
+.ops-switch input:checked + .ops-switch-track::after { transform: translateX(16px); background: var(--dsw-alias-state-success-primary, #22c55e); }
+.ops-switch input:focus-visible + .ops-switch-track { box-shadow: 0 0 0 2px color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 50%, transparent); }
+.ops-textarea { resize: vertical; min-height: 96px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; line-height: 19px; }
+.ops-form-hint { margin-top: 10px; font-size: 11.5px; line-height: 18px; color: var(--dsw-alias-label-caption, #81858c); }
 
 /* Device dialog (新增 / 编辑 / 复制 / 删除确认 / 日志明细).
    The right rail is only a few hundred px wide, so an inline form and the device
@@ -1929,6 +1941,245 @@ function TerminalTab(): ReactElement {
   )
 }
 
+// ---- execution policy tab (执行策略, m06703/m06704) ------------------------
+//
+// A user-authored CRUD model: there is no built-in deny list on the host. The
+// operator creates records, each binding a daily time window to the command
+// patterns they typed. The host blocks a command at execution time if ANY
+// enabled policy matches it (word-boundary substring) for the current time.
+// This tab is the only editor; the host's /ops-api/policies CRUD is the store.
+
+/** Render a policy's window as a short human phrase (no zone detail). */
+function describeWindow(win?: PolicyWindow): string {
+  if (!win || (!win.start && !win.end)) return '始终生效'
+  const s = win.start || '00:00'
+  const e = win.end || '24:00'
+  return `每日 ${s}–${e}`
+}
+
+interface PolicyForm {
+  name: string
+  enabled: boolean
+  start: string
+  end: string
+  timezone: string
+  commands: string
+  note: string
+}
+
+const EMPTY_POLICY: PolicyForm = {
+  name: '',
+  enabled: true,
+  start: '',
+  end: '',
+  timezone: 'Asia/Shanghai',
+  commands: '',
+  note: '',
+}
+
+function PolicyManager(): ReactElement {
+  const [policies, setPolicies] = useState<ExecPolicy[]>([])
+  const [loading, setLoading] = useState(true)
+  const [editing, setEditing] = useState<{ id?: string } | null>(null)
+  const [form, setForm] = useState<PolicyForm>(EMPTY_POLICY)
+  const [busy, setBusy] = useState(false)
+  const [formError, setFormError] = useState<string | null>(null)
+  const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  const [removing, setRemoving] = useState<ExecPolicy | null>(null)
+
+  const refresh = useCallback(async () => {
+    setLoading(true)
+    try {
+      const j = (await api<{ policies: ExecPolicy[] }>('/policies')) as any
+      setPolicies(j.policies || [])
+    } catch (e) {
+      setMsg({ kind: 'err', text: (e as Error).message })
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { void refresh() }, [refresh])
+
+  const openCreate = () => {
+    setEditing({})
+    setForm({ ...EMPTY_POLICY })
+    setFormError(null)
+  }
+  const openEdit = (p: ExecPolicy) => {
+    setEditing({ id: p.id })
+    setForm({
+      name: p.name,
+      enabled: p.enabled,
+      start: p.window?.start || '',
+      end: p.window?.end || '',
+      timezone: p.window?.timezone || 'Asia/Shanghai',
+      commands: (p.commands || []).join('\n'),
+      note: p.note || '',
+    })
+    setFormError(null)
+  }
+  const closeForm = () => setEditing(null)
+
+  const save = async () => {
+    const commands = form.commands.split('\n').map((c) => c.trim()).filter(Boolean)
+    if (!form.name.trim() || commands.length === 0) {
+      setFormError('策略名称与至少一个命令模式必填')
+      return
+    }
+    const payload = {
+      name: form.name.trim(),
+      enabled: form.enabled,
+      window: form.start.trim() || form.end.trim()
+        ? { start: form.start.trim(), end: form.end.trim(), timezone: form.timezone.trim() || 'Asia/Shanghai' }
+        : undefined,
+      commands,
+      note: form.note.trim() || undefined,
+    }
+    setBusy(true)
+    setFormError(null)
+    try {
+      if (editing?.id) {
+        await api(`/policies/${editing.id}`, { method: 'PUT', body: payload })
+        setMsg({ kind: 'ok', text: `已保存策略「${payload.name}」` })
+      } else {
+        await api('/policies', { method: 'POST', body: payload })
+        setMsg({ kind: 'ok', text: `已新建策略「${payload.name}」` })
+      }
+      closeForm()
+      refresh()
+    } catch (e) {
+      setFormError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  const remove = async (id: string) => {
+    setBusy(true)
+    try {
+      await api(`/policies/${id}`, { method: 'DELETE' })
+      setRemoving(null)
+      setMsg({ kind: 'ok', text: `已删除策略「${removing?.name ?? ''}」` })
+      refresh()
+    } catch (e) {
+      setMsg({ kind: 'err', text: (e as Error).message })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return h(Fragment, null,
+    h('div', { className: 'ops-head' },
+      h('div', null,
+        h('h2', { className: 'ops-title' }, '执行策略'),
+        h('div', { className: 'ops-sub' },
+          loading ? '加载中…'
+            : policies.length ? `共 ${policies.length} 条策略`
+            : '还没有策略'),
+      ),
+      h('div', { className: 'ops-head-right' },
+        h('button', { className: 'ops-btn', onClick: () => void refresh(), disabled: loading }, '刷新'),
+        h('button', { className: 'ops-btn primary', onClick: openCreate, disabled: busy }, '+ 新增策略'),
+      ),
+    ),
+    msg && h('div', { className: 'ops-msg ' + (msg.kind === 'ok' ? 'ok' : 'err') }, h('code', null, msg.text)),
+    loading && policies.length === 0
+      ? h('div', { className: 'ops-loading' }, '加载中…')
+      : policies.length === 0
+        ? h('div', { className: 'ops-empty' },
+            h('b', null, '还没有执行策略'),
+            '点击右上角「+ 新增策略」创建规则：设置时间窗口并填入要限制的命令（每行一个）。命中策略的命令在执行时会被拒绝。',
+          )
+        : h('div', { className: 'ops-list' }, policies.map((p) =>
+            h('div', { key: p.id, className: 'ops-dev' },
+              h('div', { className: 'ops-dev-top' },
+                h('div', { className: 'ops-dev-id' },
+                  h('span', { className: 'ops-dev-name', title: p.name }, p.name),
+                  h('code', { className: 'ops-dev-ip' }, describeWindow(p.window)),
+                ),
+                h('div', { className: 'ops-dev-logins' },
+                  h('button', {
+                    className: 'ops-btn sm' + (p.enabled ? ' on' : ''),
+                    title: p.enabled ? '点击停用' : '点击启用',
+                    onClick: async () => {
+                      try {
+                        await api(`/policies/${p.id}`, { method: 'PUT', body: { name: p.name, enabled: !p.enabled, commands: p.commands, note: p.note, window: p.window } })
+                        refresh()
+                      } catch (e) { setMsg({ kind: 'err', text: (e as Error).message }) }
+                    },
+                  }, p.enabled ? '已启用' : '已停用'),
+                ),
+              ),
+              h('div', { className: 'ops-dev-tags' },
+                (p.commands || []).map((c, i) => h('span', { key: i, className: 'ops-badge type', title: `命中的命令模式：${c}` }, c)),
+              ),
+              p.note ? h('div', { className: 'ops-dev-note', title: p.note }, p.note) : null,
+              h('div', { className: 'ops-dev-acts' },
+                h('button', { className: 'ops-btn sm', onClick: () => openEdit(p) }, '编辑'),
+                h('button', { className: 'ops-btn sm plain danger', onClick: () => setRemoving(p) }, '删除'),
+              ),
+            ),
+          )),
+    editing && h(OpsModal, {
+      title: editing.id ? '编辑策略' : '新增策略',
+      onClose: closeForm,
+      foot: h(Fragment, null,
+        h('button', { className: 'ops-btn primary', onClick: () => void save(), disabled: busy }, busy ? '保存中…' : '保存'),
+        h('button', { className: 'ops-btn plain', onClick: closeForm, disabled: busy }, '取消'),
+      ),
+      children: h(Fragment, null,
+        formError ? h('div', { className: 'ops-msg err', style: { marginBottom: 12 } }, h('code', null, formError)) : null,
+        h('div', { className: 'ops-grid2' },
+          h('label', { className: 'ops-field' },
+            h('span', { className: 'ops-label' }, '策略名称'),
+            h('input', { className: 'ops-input', value: form.name, placeholder: '例如：夜间高危命令冻结', onChange: (e: any) => setForm({ ...form, name: e.target.value }) }),
+          ),
+          h('label', { className: 'ops-field' },
+            h('span', { className: 'ops-label' }, '启用'),
+            h('label', { className: 'ops-switch' },
+              h('input', { type: 'checkbox', checked: form.enabled, onChange: (e: any) => setForm({ ...form, enabled: e.target.checked }) }),
+              h('span', { className: 'ops-switch-track' }),
+            ),
+          ),
+          h('label', { className: 'ops-field' },
+            h('span', { className: 'ops-label' }, '开始时间', h('i', null, 'HH:MM，留空为 00:00')),
+            h('input', { className: 'ops-input', value: form.start, placeholder: '22:00', onChange: (e: any) => setForm({ ...form, start: e.target.value }) }),
+          ),
+          h('label', { className: 'ops-field' },
+            h('span', { className: 'ops-label' }, '结束时间', h('i', null, 'HH:MM，留空为 24:00')),
+            h('input', { className: 'ops-input', value: form.end, placeholder: '06:00', onChange: (e: any) => setForm({ ...form, end: e.target.value }) }),
+          ),
+          h('label', { className: 'ops-field', style: { gridColumn: '1 / -1' } },
+            h('span', { className: 'ops-label' }, '时区', h('i', null, '默认 Asia/Shanghai')),
+            h('input', { className: 'ops-input', value: form.timezone, placeholder: 'Asia/Shanghai', onChange: (e: any) => setForm({ ...form, timezone: e.target.value }) }),
+          ),
+          h('label', { className: 'ops-field', style: { gridColumn: '1 / -1' } },
+            h('span', { className: 'ops-label' }, '命令模式', h('i', null, '每行一个，词边界匹配')),
+            h('textarea', { className: 'ops-input ops-textarea', rows: 5, value: form.commands, placeholder: 'reload\ndeleten\werase', onChange: (e: any) => setForm({ ...form, commands: e.target.value }) }),
+          ),
+          h('label', { className: 'ops-field', style: { gridColumn: '1 / -1' } },
+            h('span', { className: 'ops-label' }, '备注', h('i', null, '可选')),
+            h('input', { className: 'ops-input', value: form.note, placeholder: '可选', onChange: (e: any) => setForm({ ...form, note: e.target.value }) }),
+          ),
+        ),
+        h('div', { className: 'ops-form-hint' }, '时间窗口为空表示始终生效；命令按词边界包含匹配（如 "reload" 命中 "reload force"，但不命中 "reloading"）。'),
+      ),
+    }),
+    removing && h(ConfirmDialog, {
+      title: '删除策略',
+      lines: [
+        { label: '名称', value: removing.name },
+        { label: '窗口', value: describeWindow(removing.window) },
+        { label: '命令', value: (removing.commands || []).join(' / ') },
+      ],
+      warning: '删除后该限制立即失效，且无法恢复。',
+      confirmText: '删除',
+      onConfirm: () => void remove(removing.id),
+      onClose: () => setRemoving(null),
+    }),
+  )
+}
+
 // ---- page shell -----------------------------------------------------------
 
 // The sidebar tab slot hands the body the session it belongs to (standardProps),
@@ -1936,7 +2187,7 @@ function TerminalTab(): ReactElement {
 // global is only the slot's registration-time value, which is the session that
 // happened to be on screen then, not necessarily this one.
 function OpsPage(props: { sessionId?: string } = {}): ReactElement {
-  const [tab, setTab] = useState<'devices' | 'terminal' | 'logs'>('devices')
+  const [tab, setTab] = useState<'devices' | 'terminal' | 'logs' | 'policies'>('devices')
   const [tokenMsg, setTokenMsg] = useState<string | null>(null)
   const [tokenInput, setTokenInput] = useState('')
   const sessionId = typeof props.sessionId === 'string' && props.sessionId ? props.sessionId : panelSessionId
@@ -1958,7 +2209,7 @@ function OpsPage(props: { sessionId?: string } = {}): ReactElement {
     return onRevealTerminal(() => setTab('terminal'))
   }, [sessionId])
   injectStyles()
-  const TABS = { devices: '设备管理', terminal: '终端', logs: '日志' } as const
+  const TABS = { devices: '设备管理', terminal: '终端', logs: '日志', policies: '执行策略' } as const
   return h('div', { className: 'ops-root', style: { padding: '16px 16px 0', color: 'var(--dsw-alias-label-primary, #e7e7ea)' } },
     h('div', { className: 'ops-seg' },
       (Object.keys(TABS) as (keyof typeof TABS)[]).map((t) =>
@@ -1974,7 +2225,10 @@ function OpsPage(props: { sessionId?: string } = {}): ReactElement {
       ),
     ),
     h('div', { style: { flex: 1, minHeight: 0, overflow: 'auto', paddingBottom: 16 } },
-      tab === 'devices' ? h(DeviceManager, null) : tab === 'terminal' ? h(TerminalTab, null) : h(LogTab, null),
+      tab === 'devices' ? h(DeviceManager, null)
+        : tab === 'terminal' ? h(TerminalTab, null)
+        : tab === 'logs' ? h(LogTab, null)
+        : h(PolicyManager, null),
     ),
   )
 }

@@ -47,6 +47,9 @@ import type {
   AnalyzeRequest,
   AnalyzeResponse,
   CommandResult,
+  ExecPolicy,
+  PolicyInput,
+  PolicyWindow,
   LogEntry,
   LogKind,
   SessionLog,
@@ -170,11 +173,14 @@ function decryptSecret(key: Buffer, payload: string): string {
 // ---- device store ----------------------------------------------------------
 
 const DEVICES_FILE = 'devices.json'
+const POLICIES_FILE = 'policies.json'
 
 interface Store {
   dir: string
   key: Buffer
   devices: Map<string, Device>
+  /** 执行策略 records (m06703): user-authored command/time rules. */
+  policies: Map<string, ExecPolicy>
   /** Root for the per-connection audit trail; see src/session-log.ts. */
   logDir: string
 }
@@ -193,12 +199,31 @@ function loadStore(dir: string, key: Buffer): Store {
       /* corrupt — start fresh rather than crash */
     }
   }
+  const policies = new Map<string, ExecPolicy>()
+  const pfile = join(dir, POLICIES_FILE)
+  if (existsSync(pfile)) {
+    try {
+      const arr = JSON.parse(readFileSync(pfile, 'utf-8')) as ExecPolicy[]
+      for (const p of arr) {
+        if (p && p.id && Array.isArray(p.commands)) {
+          policies.set(p.id, { ...p, enabled: typeof p.enabled === 'boolean' ? p.enabled : true })
+        }
+      }
+    } catch {
+      /* corrupt — start fresh rather than crash */
+    }
+  }
   const logDir = logRoot(dir)
   ensureLogDir(logDir)
-  return { dir, key, devices: map, logDir }
+  return { dir, key, devices: map, policies, logDir }
 }
 
 function persistStore(store: Store): void {
+  persistDevices(store)
+  persistPolicies(store)
+}
+
+function persistDevices(store: Store): void {
   try {
     mkdirSync(store.dir, { recursive: true })
     const tmp = join(store.dir, DEVICES_FILE + '.tmp')
@@ -207,6 +232,18 @@ function persistStore(store: Store): void {
     renameSync(tmp, join(store.dir, DEVICES_FILE))
   } catch (e) {
     console.warn('[dsh-hillstone-cli-ops] persist devices failed:', (e as Error).message)
+  }
+}
+
+function persistPolicies(store: Store): void {
+  try {
+    mkdirSync(store.dir, { recursive: true })
+    const tmp = join(store.dir, POLICIES_FILE + '.tmp')
+    const arr = [...store.policies.values()]
+    writeFileSync(tmp, JSON.stringify(arr, null, 2), 'utf-8')
+    renameSync(tmp, join(store.dir, POLICIES_FILE))
+  } catch (e) {
+    console.warn('[dsh-hillstone-cli-ops] persist policies failed:', (e as Error).message)
   }
 }
 
@@ -869,11 +906,135 @@ async function runCommandVisible(
   timeoutMs: number,
   preferSession = true,
 ): Promise<CommandResult> {
+  // m06703/m06704: block banned commands here, before any SSH work happens,
+  // so a denied command never touches the device and never produces output.
+  const verdict = checkCommandPolicy(command, store.policies, new Date())
+  if (verdict.blocked) {
+    const reason = `策略「${verdict.policyName}」拒绝执行：命中命令模式「${verdict.matched}」`
+    console.warn(`[dsh-hillstone-cli-ops] policy blocked command on ${deviceId}: ${reason}`)
+    return {
+      command,
+      exitCode: null,
+      stdout: '',
+      stderr: reason,
+      timedOut: false,
+      blocked: true,
+      blockReason: verdict.policyName,
+    }
+  }
   if (preferSession) {
     const live = findLiveSession(deviceId)
     if (live) return runCommandInSession(live, command, timeoutMs)
   }
   return runCommand(store, deviceId, command, timeoutMs)
+}
+
+// ---- execution policy (执行策略) --------------------------------------------
+//
+// The policy is a user-authored CRUD model (m06703): there is NO built-in deny
+// list on the host. The operator creates records, each binding a daily time
+// window to the command patterns they typed. Multiple records stack — a command
+// is blocked if ANY enabled record matches it for the current time.
+//
+// Matching is a case-insensitive word-boundary substring (NOT a prefix, NOT a
+// regex): "reload" blocks "reload" and "reload force" but not "reloading". The
+// boundary is required because a bare substring would let "load" silently catch
+// "upload" or "download".
+//
+// The window is daily-recurring only (m06703): optional start/end "HH:MM" in a
+// zone, supporting cross-midnight (22:00–06:00). An empty window means always.
+
+const HHMM_RE = /^([01]?\d|2[0-3]):[0-5]\d$/
+
+/** Parse "HH:MM" into minutes since midnight, or null when malformed/empty. */
+function parseHHMM(value?: string): number | null {
+  if (!value) return null
+  const s = value.trim()
+  if (!HHMM_RE.test(s)) return null
+  const [h, m] = s.split(':').map(Number)
+  return h * 60 + m
+}
+
+/**
+ * True when `now` falls inside the policy window (in the policy's zone).
+ * An empty window (no start AND no end) is always active. Cross-midnight
+ * windows (start > end, e.g. 22:00–06:00) wrap correctly.
+ */
+function inWindow(win: PolicyWindow | undefined, now: Date): boolean {
+  if (!win) return true
+  const start = parseHHMM(win.start)
+  const end = parseHHMM(win.end)
+  if (start === null && end === null) return true
+  // Resolve the current wall-clock minute in the policy's zone. When no zone is
+  // named we use the host local zone (Node's default TZ formatting).
+  const tz = win.timezone
+  let m: number
+  if (tz) {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: tz,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(now)
+    const hh = Number(parts.find((p) => p.type === 'hour')?.value ?? '0')
+    const mm = Number(parts.find((p) => p.type === 'minute')?.value ?? '0')
+    m = ((hh === 24 ? 0 : hh) * 60) + mm
+  } else {
+    m = now.getHours() * 60 + now.getMinutes()
+  }
+  // Normal window (start <= end): active in [start, end).
+  if (start !== null && end !== null) {
+    if (start <= end) return m >= start && m < end
+    // Cross-midnight: active in [start, 24:00) or [00:00, end).
+    return m >= start || m < end
+  }
+  // Only one bound set: start active from start onward, end active until end.
+  if (start !== null) return m >= start
+  return m < end!
+}
+
+/**
+ * Case-insensitive word-boundary substring match (see header). Splits the
+ * command on token boundaries so multi-word patterns like "delete vrouter"
+ * check each token against the haystack words. A non-word character (or a
+ * string edge) on both sides of the pattern is what makes "reload" NOT match
+ * "reloading".
+ */
+function patternMatches(pattern: string, command: string): boolean {
+  const p = pattern.trim().toLowerCase()
+  if (!p) return false
+  const hay = ` ${command.toLowerCase().replace(/\s+/g, ' ').trim()} `
+  const escaped = p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const re = new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}(?=$|[^\\p{L}\\p{N}])`, 'u')
+  return re.test(hay)
+}
+
+export interface PolicyVerdict {
+  blocked: boolean
+  policyId?: string
+  policyName?: string
+  matched?: string
+}
+
+/**
+ * Evaluate a command against every enabled policy (m06703/m06704).
+ * Returns the first blocking hit; policies are checked in insertion order.
+ */
+export function checkCommandPolicy(
+  command: string,
+  policies: Map<string, ExecPolicy>,
+  now: Date = new Date(),
+): PolicyVerdict {
+  for (const p of policies.values()) {
+    if (!p.enabled) continue
+    if (!inWindow(p.window, now)) continue
+    for (const pat of p.commands) {
+      if (patternMatches(pat, command)) {
+        return { blocked: true, policyId: p.id, policyName: p.name, matched: pat.trim() }
+      }
+    }
+  }
+  return { blocked: false }
 }
 
 // ---- host LLM analysis -----------------------------------------------------
@@ -1125,6 +1286,12 @@ async function handleApi(deps: ApiDeps, req: IncomingMessage, res: ServerRespons
     // shows a window that is still open instead of offering to open another.
     if (pathname === '/web-login') {
       writeJson(res, 200, { ok: true, states: webLoginStates() })
+      return
+    }
+    // GET /ops-api/policies  → all 执行策略 records (m06703).
+    if (pathname === '/policies') {
+      const list = [...deps.store.policies.values()]
+      writeJson(res, 200, { ok: true, policies: list })
       return
     }
     writeJson(res, 404, { ok: false, error: { code: 'not-found', message: 'unknown ops-api route' } })
@@ -1391,6 +1558,31 @@ async function handleApi(deps: ApiDeps, req: IncomingMessage, res: ServerRespons
       writeJson(res, 200, { ok: true, closed: await webLoginClose(body.deviceId) })
       return
     }
+    // POST /ops-api/policies  → create an 执行策略 record (m06703).
+    if (pathname === '/policies') {
+      const body = JSON.parse((await readBody(req)) || '{}') as PolicyInput
+      if (!body.name || !Array.isArray(body.commands) || body.commands.filter((c) => typeof c === 'string' && c.trim()).length === 0) {
+        writeJson(res, 400, { ok: false, error: { code: 'bad-request', message: 'name 与至少一个命令模式必填' } })
+        return
+      }
+      const now = new Date().toISOString()
+      const policy: ExecPolicy = {
+        id: randomUUID(),
+        name: body.name.trim(),
+        enabled: body.enabled !== false,
+        window: body.window && (body.window.start || body.window.end)
+          ? { start: body.window.start, end: body.window.end, timezone: body.window.timezone }
+          : undefined,
+        commands: body.commands.map((c) => String(c).trim()).filter(Boolean),
+        note: body.note,
+        createdAt: now,
+        updatedAt: now,
+      }
+      deps.store.policies.set(policy.id, policy)
+      persistStore(deps.store)
+      writeJson(res, 201, { ok: true, policy })
+      return
+    }
     writeJson(res, 404, { ok: false, error: { code: 'not-found', message: 'unknown ops-api route' } })
     return
   }
@@ -1436,6 +1628,51 @@ async function handleApi(deps: ApiDeps, req: IncomingMessage, res: ServerRespons
       const ok = deps.store.devices.delete(id)
       if (ok) persistStore(deps.store)
       writeJson(res, ok ? 200 : 404, { ok, deviceId: id })
+      return
+    }
+  }
+
+  // PUT /ops-api/policies/:id  (update)
+  if (method === 'PUT') {
+    const m = pathname.match(/^\/policies\/([^/]+)$/)
+    if (m) {
+      const id = decodeURIComponent(m[1])
+      const existing = deps.store.policies.get(id)
+      if (!existing) {
+        writeJson(res, 404, { ok: false, error: { code: 'not-found', message: 'policy not found' } })
+        return
+      }
+      const body = JSON.parse((await readBody(req)) || '{}') as PolicyInput
+      if (!body.name || !Array.isArray(body.commands) || body.commands.filter((c) => typeof c === 'string' && c.trim()).length === 0) {
+        writeJson(res, 400, { ok: false, error: { code: 'bad-request', message: 'name 与至少一个命令模式必填' } })
+        return
+      }
+      const updated: ExecPolicy = {
+        ...existing,
+        name: body.name.trim(),
+        enabled: body.enabled !== false,
+        window: body.window && (body.window.start || body.window.end)
+          ? { start: body.window.start, end: body.window.end, timezone: body.window.timezone }
+          : undefined,
+        commands: body.commands.map((c) => String(c).trim()).filter(Boolean),
+        note: body.note,
+        updatedAt: new Date().toISOString(),
+      }
+      deps.store.policies.set(id, updated)
+      persistStore(deps.store)
+      writeJson(res, 200, { ok: true, policy: updated })
+      return
+    }
+  }
+
+  // DELETE /ops-api/policies/:id
+  if (method === 'DELETE') {
+    const m = pathname.match(/^\/policies\/([^/]+)$/)
+    if (m) {
+      const id = decodeURIComponent(m[1])
+      const ok = deps.store.policies.delete(id)
+      if (ok) persistStore(deps.store)
+      writeJson(res, ok ? 200 : 404, { ok, policyId: id })
       return
     }
   }
@@ -1774,6 +2011,24 @@ function activate(ctx: ContextLike, config?: Partial<Config>): void {
                   raw === true || raw === 'true' ? true : raw === false || raw === 'false' ? false : null
                 const submit = explicit ?? looksLikeCommand
                 const payload = submit && !/[\r\n]$/.test(args.data) ? args.data + '\r' : args.data
+                // m06703/m06704: the line that is about to be committed to the
+                // device is the one the policy governs. A bare keystroke is not a
+                // command, so only the submitted payload is checked — and only
+                // its leading command, not the trailing CR.
+                if (submit) {
+                  const verdict = checkCommandPolicy(args.data, store.policies, new Date())
+                  if (verdict.blocked) {
+                    const reason = `策略「${verdict.policyName}」拒绝执行：命中命令模式「${verdict.matched}」`
+                    console.warn(`[dsh-hillstone-cli-ops] policy blocked send_input on ${args.connId}: ${reason}`)
+                    // Audit the blocked attempt, but do NOT write it to the pty.
+                    try {
+                      session.log.event(`策略拒绝命令：${args.data.trim()}（${reason}）`, 'agent')
+                    } catch {
+                      /* best-effort */
+                    }
+                    return { ok: false, error: reason, blocked: true, policyName: verdict.policyName }
+                  }
+                }
                 try {
                   await enqueueWrite(session, payload)
                   // Every keystroke is an operator-visible action on a production

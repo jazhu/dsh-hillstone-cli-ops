@@ -170,6 +170,23 @@ const checks = [
   // below, next to panelCss, which is not in scope this early in the file.)
   ['client  the SSH path is called CLI 登录', /CLI 登录/, clientText],
   ['client  the login buttons carry a glyph', /CliIcon[\s\S]{0,4000}WebIcon|WebIcon[\s\S]{0,4000}CliIcon/, client],
+  // m06703/m06704 — 执行策略: a user-authored CRUD model (no built-in deny list).
+  // The host gates execution at runCommandVisible and send_input; the client has
+  // a dedicated tab and a policy editor. Each fact is load-bearing — a silent
+  // rot here means an agent can run a banned command with nobody noticing.
+  ['host    policy store file', /policies\.json/, host],
+  ['host    policy CRUD routes', /\^\\\/policies\\\/\(\[\^\/]\+\)\$/, host],
+  ['host    policy evaluation entry', /function checkCommandPolicy|checkCommandPolicy = function/, host],
+  ['host    word-boundary match', /\[\^\\\\p\{L\}\\\\p\{N\}\]/, host],
+  ['host    cross-midnight window', /Cross-midnight|cross-midnight|>= start \|\| m < end/, host],
+  ['host    run_and_analyze is gated', /const verdict = checkCommandPolicy\(command, store\.policies/, host],
+  ['host    send_input is gated', /const verdict = checkCommandPolicy\(args\.data, store\.policies/, host],
+  ['host    a blocked command is never sent to the device', /policy blocked command on|policy blocked send_input on/, host],
+  ['client  执行策略 tab in the seg control', /policies:/, client],
+  ['client  policy manager renders', /function PolicyManager\(/, client],
+  ['client  policy editor saves', /api\(`\/policies\/\$\{editing\.id\}`|api\(\`\/policies\/\$\{editing\.id\}\`/, client],
+  ['client  the tab says what it does', /还没有执行策略/, clientText],
+  ['client  the editor explains the match rule', /词边界包含匹配/, clientText],
 ]
 
 // m05105 — the manifest is what the loader reads BEFORE any code runs. It listed

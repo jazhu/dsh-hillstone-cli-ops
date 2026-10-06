@@ -185,6 +185,59 @@ export interface CommandResult {
    * the signal that the device ignored `terminal length 0`.
    */
   pages?: number
+  /**
+   * Set when the command was rejected by an 执行策略 rule instead of running.
+   * The host blocks it before any SSH work happens, so there is no exit code and
+   * no device output — `stderr` carries the human-readable reason.
+   */
+  blocked?: boolean
+  /** The policy name that blocked the command, when `blocked` is true. */
+  blockReason?: string
+}
+
+// ---- execution policy (执行策略) --------------------------------------------
+//
+// A policy is a user-authored record: a time window plus the command patterns the
+// operator typed, with no built-in deny list on the host. Multiple policies stack
+// — a command is blocked if ANY enabled policy matches it for the current time.
+
+/** A recurring daily time window. Times are "HH:MM" (24h) in the policy's tz. */
+export interface PolicyWindow {
+  /** Inclusive start, e.g. "22:00". Empty means "from midnight". */
+  start?: string
+  /** Exclusive end, e.g. "06:00". Empty or <= start means "until midnight". */
+  end?: string
+  /** IANA or "±HH:MM" zone; defaults to the host's local zone. */
+  timezone?: string
+}
+
+export interface ExecPolicy {
+  id: string
+  /** Display name, e.g. "夜间冻结高危命令". */
+  name: string
+  /** When false the policy is ignored entirely (still shown in the list). */
+  enabled: boolean
+  /** Daily recurring window the rule applies in. Absent = always active. */
+  window?: PolicyWindow
+  /**
+   * Command patterns (one per line in the UI). A command is blocked if the
+   * pattern matches as a case-insensitive word-boundary substring — so "reload"
+   * blocks "reload" and "reload force" but not "reloading".
+   */
+  commands: string[]
+  /** Free-text note, shown in the list. */
+  note?: string
+  createdAt: string
+  updatedAt: string
+}
+
+/** Payload accepted when creating or updating a policy. `id` is assigned on POST. */
+export interface PolicyInput {
+  name: string
+  enabled?: boolean
+  window?: PolicyWindow
+  commands: string[]
+  note?: string
 }
 
 export interface AnalyzeResponse {
