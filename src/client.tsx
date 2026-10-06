@@ -334,10 +334,10 @@ const panelCss = `
 .ops-head-right { margin-left: auto; display: flex; align-items: center; gap: 6px; }
 
 /* Segmented tab switcher */
-.ops-seg { display: inline-flex; align-items: center; gap: 2px; padding: 2px; border-radius: var(--dsw-radius-md, 12px); background: var(--dsw-alias-bg-layer-2, #1e1f23); border: 1px solid var(--dsw-alias-border-l2, #2a2a36); }
+.ops-seg { display: inline-flex; align-items: center; gap: 2px; padding: 2px; border-radius: var(--dsw-radius-md, 12px); background: var(--dsw-alias-bg-layer-1, #1a1b1f); border: 1px solid var(--dsw-alias-border-l2, #2a2a36); box-shadow: var(--dsw-shadow-lv1, 0 1px 3px 0 rgba(0,0,0,.18)); }
 .ops-seg button { border: none; background: transparent; color: var(--dsw-alias-label-tertiary, #9a9aa6); padding: 4px 14px; border-radius: var(--dsw-radius-sm, 8px); cursor: pointer; font-family: inherit; font-size: 13px; line-height: 20px; white-space: nowrap; transition: background var(--ds-transition-duration-fast, .1s) var(--ds-ease-in-out, ease), color var(--ds-transition-duration-fast, .1s) var(--ds-ease-in-out, ease); }
-.ops-seg button:hover { color: var(--dsw-alias-label-primary, #e7e7ea); }
-.ops-seg button.on { background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 18%, transparent); color: var(--dsw-alias-label-primary, #e7e7ea); font-weight: 500; }
+.ops-seg button:hover { color: var(--dsw-alias-label-primary, #e7e7ea); background: var(--dsw-alias-interactive-bg-hover, #ffffff10); }
+.ops-seg button.on { background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 18%, transparent); color: var(--dsw-alias-label-primary, #e7e7ea); font-weight: 500; box-shadow: 0 1px 2px 0 rgba(0,0,0,.18); }
 
 /* Buttons */
 .ops-btn { display: inline-flex; align-items: center; justify-content: center; gap: 4px; background: transparent; border: 1px solid var(--dsw-alias-border-l2, #3a414b); color: var(--dsw-alias-label-secondary, #cfd3d6); border-radius: var(--dsw-radius-sm, 8px); cursor: pointer; font-family: inherit; font-size: 13px; line-height: 20px; padding: 4px 12px; white-space: nowrap; transition: background var(--ds-transition-duration-fast, .1s) var(--ds-ease-in-out, ease), color var(--ds-transition-duration-fast, .1s) var(--ds-ease-in-out, ease), border-color var(--ds-transition-duration-fast, .1s) var(--ds-ease-in-out, ease); }
@@ -412,8 +412,8 @@ const panelCss = `
 /* Device cards — a table forced a 6-column squeeze into a narrow right rail;
    stacked cards keep the identity readable and the actions thumb-reachable. */
 .ops-list { display: flex; flex-direction: column; gap: 10px; }
-.ops-dev { border: 1px solid var(--dsw-alias-border-l2, #2a2a36); border-radius: var(--dsw-radius-md, 12px); background: var(--dsw-alias-bg-layer-2, #1e1f23); padding: 12px 14px 10px; transition: border-color var(--ds-transition-duration-fast, .1s) var(--ds-ease-in-out, ease); }
-.ops-dev:hover { border-color: var(--dsw-alias-border-l4, #4a4d55); }
+.ops-dev { border: 1px solid var(--dsw-alias-border-l2, #2a2a36); border-radius: var(--dsw-radius-md, 12px); background: var(--dsw-alias-bg-layer-2, #1e1f23); padding: 12px 14px 10px; box-shadow: var(--dsw-shadow-lv1, 0 1px 3px 0 rgba(0,0,0,.18)); transition: border-color var(--ds-transition-duration-fast, .1s) var(--ds-ease-in-out, ease), box-shadow var(--ds-transition-duration-fast, .1s) var(--ds-ease-in-out, ease), transform var(--ds-transition-duration-fast, .1s) var(--ds-ease-in-out, ease); }
+.ops-dev:hover { border-color: var(--dsw-alias-border-l4, #4a4d55); box-shadow: var(--dsw-shadow-lv2, 0 6px 16px 0 rgba(0,0,0,.22)); transform: translateY(-1px); }
 /* The name row holds the lamp, the identity and the two ways in. It wraps: at
    rail width the lamp plus a truncated name are the part worth keeping, and a
    button group that refuses to shrink would shove both off the card. */
@@ -439,11 +439,12 @@ const panelCss = `
 .ops-btn.login.cli:hover:not(:disabled) { background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 24%, var(--dsw-alias-bg-layer-3, #2c2c2e)); border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 55%, transparent); }
 /* m05915 — the liveness verdict as a lamp, not as a word. Nothing renders
    before the first scan: a lamp that is merely unlit would read as a verdict,
-   and "not looked at yet" is not one. */
+   and "not looked at yet" is not one. The glow is the point — a status light
+   that does not glow reads as a painted dot, not as "this box is on". */
 .ops-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--dsw-alias-border-l4, #4a4d55); }
-.ops-dot.online { background: var(--dsw-alias-state-success-primary, #22c55e); }
-.ops-dot.offline { background: var(--dsw-alias-state-error-primary, #f85149); }
-.ops-dot.probing { background: var(--dsw-alias-label-caption, #81858c); animation: ops-blink 1.1s ease-in-out infinite; }
+.ops-dot.online { background: var(--dsw-alias-state-success-primary, #22c55e); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-success-primary, #22c55e) 22%, transparent), 0 0 8px 1px color-mix(in srgb, var(--dsw-alias-state-success-primary, #22c55e) 55%, transparent); }
+.ops-dot.offline { background: var(--dsw-alias-state-error-primary, #f85149); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-error-primary, #f85149) 22%, transparent), 0 0 8px 1px color-mix(in srgb, var(--dsw-alias-state-error-primary, #f85149) 50%, transparent); }
+.ops-dot.probing { background: var(--dsw-alias-label-caption, #81858c); box-shadow: 0 0 6px 0 color-mix(in srgb, var(--dsw-alias-label-caption, #81858c) 45%, transparent); animation: ops-blink 1.1s ease-in-out infinite; }
 @keyframes ops-blink { 0%, 100% { opacity: 1 } 50% { opacity: .35 } }
 .ops-dev-acts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding-top: 10px; margin-top: 10px; border-top: .5px solid var(--dsw-alias-border-l2, #2a2a36); }
 .ops-dev-tags { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 7px; }
