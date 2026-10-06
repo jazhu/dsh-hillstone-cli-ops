@@ -25,7 +25,7 @@
  *   Tab 3 日志       — the per-connection audit trail: who connected to which
  *                     device, and what was typed or run while they were there.
  *
- * The two tabs are mutually exclusive, so 「连接设备」 (on 设备管理) cannot hand
+ * The two tabs are mutually exclusive, so 「CLI 登录」 (on 设备管理) cannot hand
  * work to the terminal tab by event: TerminalTab is not mounted at click time.
  * A module-level pending-connect bridge issues the request eagerly and parks
  * the result; OpsPage switches to 终端 and TerminalTab drains it on mount.
@@ -140,7 +140,7 @@ async function api<T>(path: string, opts: { method?: string; body?: unknown } = 
 
 // ---- cross-tab connect bridge ----------------------------------------------
 //
-// 「连接设备」 is clicked on the 设备管理 tab, but the connection UI lives on the
+// 「CLI 登录」 is clicked on the 设备管理 tab, but the connection UI lives on the
 // 终端 tab, which is unmounted at that moment. The previous implementation
 // dispatched a window CustomEvent that only TerminalTab listened for, so the
 // click silently did nothing until the user happened to switch tabs (and even
@@ -409,23 +409,42 @@ const panelCss = `
 .ops-pager-info { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary, #9a9aa6); font-variant-numeric: tabular-nums; }
 .ops-pager-acts { margin-left: auto; display: flex; align-items: center; gap: 6px; }
 
-/* Liveness badge. Distinct from the connection StatusBadge: this one is a TCP
-   reachability verdict from a port scan, which says nothing about whether SSH
-   will actually accept the account. */
-.ops-badge.online { color: var(--dsw-alias-state-success-primary, #22c55e); background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #22c55e) 14%, transparent); }
-.ops-badge.offline { color: var(--dsw-alias-state-error-primary, #f85149); background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #f85149) 14%, transparent); }
-.ops-badge.probing { color: var(--dsw-alias-label-tertiary, #9a9aa6); background: color-mix(in srgb, var(--dsw-alias-label-tertiary, #9a9aa6) 14%, transparent); }
-
 /* Device cards — a table forced a 6-column squeeze into a narrow right rail;
    stacked cards keep the identity readable and the actions thumb-reachable. */
 .ops-list { display: flex; flex-direction: column; gap: 10px; }
 .ops-dev { border: 1px solid var(--dsw-alias-border-l2, #2a2a36); border-radius: var(--dsw-radius-md, 12px); background: var(--dsw-alias-bg-layer-2, #1e1f23); padding: 12px 14px 10px; transition: border-color var(--ds-transition-duration-fast, .1s) var(--ds-ease-in-out, ease); }
 .ops-dev:hover { border-color: var(--dsw-alias-border-l4, #4a4d55); }
-.ops-dev-top { display: flex; align-items: center; gap: 8px; }
-.ops-dev-name { font-size: 14px; line-height: 22px; font-weight: 500; color: var(--dsw-alias-label-primary, #f9fafb); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ops-dev-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 6px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary, #9a9aa6); }
-.ops-dev-meta code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; color: var(--dsw-alias-label-secondary, #cfd3d6); background: var(--dsw-alias-bg-layer-3, #2c2c2e); border-radius: var(--dsw-radius-xs, 4px); padding: 0 5px; }
+/* The name row holds the lamp, the identity and the two ways in. It wraps: at
+   rail width the lamp plus a truncated name are the part worth keeping, and a
+   button group that refuses to shrink would shove both off the card. */
+.ops-dev-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* Name and address are one identity (m05901). The account and the SSH or web
+   port live on in the lamp's tooltip and in the edit dialog; printing them
+   under every name made the list read like a database dump. */
+.ops-dev-id { display: flex; align-items: baseline; gap: 8px; flex: 1 1 auto; min-width: 0; }
+.ops-dev-name { font-size: 14px; line-height: 22px; font-weight: 500; color: var(--dsw-alias-label-primary, #f9fafb); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ops-dev-ip { flex: none; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary, #9a9aa6); }
 .ops-dev-note { margin-top: 6px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-caption, #81858c); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* m05847 — the two ways in, parked on the name row so the card opens with how
+   to get onto the box instead of with record-management verbs. */
+.ops-dev-logins { display: flex; align-items: center; gap: 6px; flex: none; margin-left: auto; }
+.ops-btn.login { gap: 5px; padding: 4px 11px; font-size: 12px; line-height: 18px; font-weight: 500; background: var(--dsw-alias-bg-layer-3, #2c2c2e); border-color: var(--dsw-alias-border-l2, #3a414b); box-shadow: var(--dsw-shadow-lv1, 0 2px 4px 0 rgba(0,0,0,.05)); }
+.ops-btn.login:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover, #ffffff14); border-color: var(--dsw-alias-border-l4, #4a4d55); }
+.ops-btn.login svg { flex: none; opacity: .9; }
+/* The CLI path is the everyday one, so it keeps the accent; WebUI is the
+   slower browser-bound route and stays neutral until it succeeds. Needed
+   explicitly because .login sets a background that would otherwise win over
+   .primary on equal specificity. */
+.ops-btn.login.cli { color: var(--dsw-alias-state-business-primary, #4176e6); border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 40%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 14%, var(--dsw-alias-bg-layer-3, #2c2c2e)); }
+.ops-btn.login.cli:hover:not(:disabled) { background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 24%, var(--dsw-alias-bg-layer-3, #2c2c2e)); border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 55%, transparent); }
+/* m05915 — the liveness verdict as a lamp, not as a word. Nothing renders
+   before the first scan: a lamp that is merely unlit would read as a verdict,
+   and "not looked at yet" is not one. */
+.ops-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--dsw-alias-border-l4, #4a4d55); }
+.ops-dot.online { background: var(--dsw-alias-state-success-primary, #22c55e); }
+.ops-dot.offline { background: var(--dsw-alias-state-error-primary, #f85149); }
+.ops-dot.probing { background: var(--dsw-alias-label-caption, #81858c); animation: ops-blink 1.1s ease-in-out infinite; }
+@keyframes ops-blink { 0%, 100% { opacity: 1 } 50% { opacity: .35 } }
 .ops-dev-acts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding-top: 10px; margin-top: 10px; border-top: .5px solid var(--dsw-alias-border-l2, #2a2a36); }
 .ops-dev-tags { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 7px; }
 /* A native <select> keeps the OS popup, so appearance:auto stays — but then the
@@ -601,20 +620,47 @@ const LIVENESS_TITLE: Record<string, string> = {
   probing: '正在做 TCP 连接测试…',
 }
 
-function LivenessBadge({ liveness, port }: { liveness: DeviceLiveness; port: number }): ReactElement {
+// The verdicts live at module scope (m05915), not in the list component: the
+// device list unmounts the moment the operator glances at another tab, and a
+// lamp that goes dark on the way back is not the 常驻 display it promises. So a
+// scan result outlives the tab switch and is replaced only by the next scan.
+// Devices that are renamed or deleted are still pruned against the current
+// list, so this is never a verdict about a device that no longer exists.
+let livenessStore: Record<string, DeviceLiveness> = {}
+const livenessListeners = new Set<() => void>()
+
+function subscribeLiveness(fn: () => void): () => void {
+  livenessListeners.add(fn)
+  return () => { livenessListeners.delete(fn) }
+}
+
+function putLiveness(next: Record<string, DeviceLiveness>): void {
+  livenessStore = next
+  for (const fn of [...livenessListeners]) fn()
+}
+
+/**
+ * The liveness verdict as a lamp in front of the device name (m05915).
+ *
+ * A lamp instead of a word: the name row also carries the two login buttons,
+ * and a three-character badge was what pushed long names and the address off
+ * the card. Everything the badge used to say survives in the tooltip — the
+ * caveat in particular, because a green lamp says "reachable", never "logged
+ * in", and that difference is the whole reason the wording says 端口可达.
+ */
+function LivenessDot({ liveness, port }: { liveness: DeviceLiveness; port: number }): ReactElement {
   const cls = liveness.state === 'online' ? 'online' : liveness.state === 'offline' ? 'offline' : 'probing'
   const detail = liveness.state === 'online' && liveness.ms !== undefined
     ? `${LIVENESS_TEXT[cls]}（${liveness.ms}ms）`
     : LIVENESS_TEXT[cls]
   return h('span', {
-    className: 'ops-badge ' + cls,
+    className: 'ops-dot ' + cls,
+    role: 'img',
+    'aria-label': detail,
     // The error is the actionable part of a failed probe (refused vs timeout vs
     // unreachable), so it goes in the tooltip rather than being flattened away.
-    title: [LIVENESS_TITLE[cls], `SSH ${liveness.ip}:${port ?? liveness.port}`, liveness.error].filter(Boolean).join('\n'),
-  },
-    h('b', null),
-    detail,
-  )
+    title: [detail, LIVENESS_TITLE[cls], `SSH ${liveness.ip}:${port ?? liveness.port}`, liveness.error].filter(Boolean).join('\n'),
+  })
 }
 
 /**
@@ -835,6 +881,25 @@ function DeviceDialog({ editing, copyFrom, form, setForm, busy, notice, error, o
   })
 }
 
+// Two glyphs for the login buttons (m05847). They are decoration, not
+// information: the label already says which way in this is. What they buy is a
+// glanceable difference at 12px in a rail that is often narrower than the two
+// Chinese labels side by side.
+function CliIcon(): ReactElement {
+  return h('svg', { viewBox: '0 0 16 16', width: 12, height: 12, 'aria-hidden': 'true', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round' },
+    h('path', { d: 'M3 4.5 6.5 8 3 11.5' }),
+    h('path', { d: 'M8.5 12h4.5' }),
+  )
+}
+
+function WebIcon(): ReactElement {
+  return h('svg', { viewBox: '0 0 16 16', width: 12, height: 12, 'aria-hidden': 'true', fill: 'none', stroke: 'currentColor', strokeWidth: 1.4 },
+    h('circle', { cx: 8, cy: 8, r: 5.6 }),
+    h('path', { d: 'M2.6 8h10.8' }),
+    h('path', { d: 'M8 2.4c1.6 2 2.4 3.6 2.4 5.6S9.6 11.6 8 13.6c-1.6-2-2.4-3.6-2.4-5.6S6.4 4.4 8 2.4z' }),
+  )
+}
+
 function DeviceManager(): ReactElement {
   const [devices, setDevices] = useState<DeviceDTO[]>([])
   const [loading, setLoading] = useState(true)
@@ -860,10 +925,12 @@ function DeviceManager(): ReactElement {
   // list is refreshed underneath the user.
   const [query, setQuery] = useState('')
   const [page, setPage] = useState(1)
-  // Liveness verdicts from the manual TCP scan, keyed by device id. Not device
-  // state: a device that was renamed or deleted must not keep a stale verdict,
-  // so this map is pruned against the current list on every render of the list.
-  const [liveness, setLiveness] = useState<Record<string, DeviceLiveness>>({})
+  // The verdicts themselves live in the module store above; this is only a
+  // re-render trigger for them. Pruning against the current device list happens
+  // where the list is rendered.
+  const [, bumpLiveness] = useState(0)
+  useEffect(() => subscribeLiveness(() => bumpLiveness((n) => n + 1)), [])
+  const liveness = livenessStore
   const [probing, setProbing] = useState(false)
   // m05288: the last WebUI login verdict per device, and which device has a
   // login in flight. Kept apart because one is a report from the host and the
@@ -1111,18 +1178,16 @@ function DeviceManager(): ReactElement {
     setProbing(true)
     // Mark every device in the visible list as probing first, so a 20-device
     // list does not sit blank for the length of the slowest timeout.
-    setLiveness((prev) => {
-      const next = { ...prev }
-      for (const d of devices) next[d.id] = { deviceId: d.id, ip: d.ip, port: d.port, state: 'probing' }
-      return next
+    putLiveness({
+      ...livenessStore,
+      ...Object.fromEntries(devices.map((d) => [d.id, { deviceId: d.id, ip: d.ip, port: d.port, state: 'probing' as const }])),
     })
     try {
       const j = (await api<{ results: DeviceLiveness[] }>('/devices/ping', { method: 'POST', body: {} })) as any
       const results = (j.results || []) as DeviceLiveness[]
-      setLiveness((prev) => {
-        const next = { ...prev }
-        for (const r of results) next[r.deviceId] = r
-        return next
+      putLiveness({
+        ...livenessStore,
+        ...Object.fromEntries(results.map((r) => [r.deviceId, r])),
       })
       const up = results.filter((r) => r.state === 'online').length
       setMsg({
@@ -1243,33 +1308,38 @@ function DeviceManager(): ReactElement {
                 const wuBusy = webUiBusy === d.id
                 return h('div', { key: d.id, className: 'ops-dev' },
                   h('div', { className: 'ops-dev-top' },
-                    h('span', { className: 'ops-dev-name', title: d.name }, d.name),
-                    live ? h(LivenessBadge, { liveness: live, port: d.port }) : null,
-                    connectingId === d.id ? h(StatusBadge, { status: 'connecting' }) : null,
+                    live ? h(LivenessDot, { liveness: live, port: d.port }) : null,
+                    h('div', { className: 'ops-dev-id' },
+                      h('span', { className: 'ops-dev-name', title: d.name }, d.name),
+                      h('code', { className: 'ops-dev-ip', title: `${d.account}@${d.ip}:${d.port}` }, d.ip),
+                    ),
+                    // m05847: the two ways onto the box, both on the name row and
+                    // right-aligned. They are one decision ("get me onto this
+                    // device"), so they sit together; 编辑/复制/删除 are record
+                    // management and stay on the row below.
+                    h('div', { className: 'ops-dev-logins' },
+                      h('button', {
+                        className: 'ops-btn login cli primary',
+                        onClick: () => connectDevice(d),
+                        disabled: connectingId === d.id,
+                        title: `用 ${d.account} 打开 ${d.ip}:${d.port} 的 SSH 终端（CLI）`,
+                      }, h(CliIcon), connectingId === d.id ? '连接中…' : 'CLI 登录'),
+                      // m05288: opens the management UI in a real browser window and
+                      // logs in with the stored account. The password is filled in by
+                      // the host, so this button never has one to send.
+                      h('button', {
+                        className: 'ops-btn login web' + (wu?.status === 'ready' ? ' on' : ''),
+                        onClick: () => void webLogin(d),
+                        disabled: wuBusy,
+                        title: `打开 ${d.ip} 的 Web 管理界面并自动登录（用设备表里保存的账号密码）`,
+                      }, h(WebIcon), wuBusy ? '登录中…' : 'WebUI 登录'),
+                    ),
                   ),
                   h('div', { className: 'ops-dev-tags' },
                     h('span', { className: 'ops-badge type', title: '设备类型' }, DEVICE_TYPE_LABELS[d.deviceType ?? 'other']),
                   ),
-                  h('div', { className: 'ops-dev-meta' },
-                    h('code', null, d.ip),
-                    h('span', null, '·'),
-                    h('span', null, d.account),
-                    h('span', null, '·'),
-                    h('span', null, `SSH ${d.port}`),
-                    d.webPort ? h(Fragment, null, h('span', null, '·'), h('span', null, `Web ${d.webPort}`)) : null,
-                  ),
                   d.note ? h('div', { className: 'ops-dev-note', title: d.note }, d.note) : null,
                   h('div', { className: 'ops-dev-acts' },
-                    h('button', { className: 'ops-btn primary sm', onClick: () => connectDevice(d), disabled: connectingId === d.id }, connectingId === d.id ? '连接中…' : '连接设备'),
-                    // m05288: opens the management UI in a real browser window and
-                    // logs in with the stored account. The password is filled in by
-                    // the host, so this button never has one to send.
-                    h('button', {
-                      className: 'ops-btn sm' + (wu?.status === 'ready' ? ' on' : ''),
-                      onClick: () => void webLogin(d),
-                      disabled: wuBusy,
-                      title: `打开 ${d.ip} 的 Web 管理界面并自动登录（用设备表里保存的账号密码）`,
-                    }, wuBusy ? '登录中…' : 'WebUI 登录'),
                     h('button', { className: 'ops-btn sm', onClick: () => openEdit(d) }, '编辑'),
                     h('button', {
                       className: 'ops-btn sm',
@@ -1846,7 +1916,7 @@ function TerminalTab(): ReactElement {
       : !connecting
         ? h('div', { className: 'ops-empty' },
             h('b', null, '暂无连接'),
-            '连接成功后会自动切到这个页面。在「设备管理」中点击「连接设备」，或让 agent 调用 hillstone_open_terminal，即可在这里打开 SSH 终端。',
+            '连接成功后会自动切到这个页面。在「设备管理」中点击「CLI 登录」，或让 agent 调用 hillstone_open_terminal，即可在这里打开 SSH 终端。',
           )
         : null,
     h('div', { style: { flex: 1, minHeight: 320 } }, active ? h(TerminalPane, { key: active.connId, conn: active }) : null),
@@ -1868,7 +1938,7 @@ function OpsPage(props: { sessionId?: string } = {}): ReactElement {
     setTokenNotice((reason) => setTokenMsg(reason))
     return () => setTokenNotice(null)
   }, [])
-  // A 连接设备 click on the 设备管理 tab must land the user on 终端. TerminalTab
+  // A CLI 登录 click on the 设备管理 tab must land the user on 终端. TerminalTab
   // is unmounted while we are here, so the bridge notifies this shell instead.
   useEffect(() => onPendingConnect(() => setTab('terminal')), [])
   // A session opened by the agent (hillstone_open_terminal / run_and_analyze)

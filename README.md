@@ -19,7 +19,7 @@ terminal). Both are built from one `src/` tree.
 
 | Tab | What it does |
 | --- | --- |
-| **设备管理** | CRUD devices (name / IP / account / password / SSH port / device type / web port / note). 新增, 复制 and 编辑 all run in one centred dialog. Each card has a **WebUI 登录** button — see below. |
+| **设备管理** | CRUD devices (name / IP / account / password / SSH port / device type / web port / note). 新增, 复制 and 编辑 all run in one centred dialog. Each card's name row carries both ways onto the box: **CLI 登录** (SSH terminal) and **WebUI 登录** (browser), right-aligned. A lamp in front of the name shows the last liveness verdict: green reachable, red unreachable, nothing before the first scan. |
 | **终端** | One xterm.js terminal per live connection. Input goes to the host, device output streams back over SSE. A new connection switches this panel straight to 终端, so you land on the live session instead of the device list. |
 | **日志** | The per-connection audit trail: who connected to which device, what was typed, which commands were run, when and why the session ended. |
 
@@ -37,7 +37,8 @@ channel.
 
 ### WebUI 登录
 
-Every device card has a **WebUI 登录** button. It opens the device's management
+Every device card has a **WebUI 登录** button, on the name row next to **CLI 登录**.
+It opens the device's management
 UI in a real browser window, logs in with the account already stored for that
 device, and leaves the window on your desktop — you then work in the browser
 yourself.

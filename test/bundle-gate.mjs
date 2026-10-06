@@ -109,7 +109,9 @@ const checks = [
   ['client  device list paginates', /\.ops-pager \{/, client],
   ['client  device cards keep the 复制 action', /openCopy\(/, client],
   ['client  the copy dialog says where it came from', /\\u590D\\u5236\\u81EA|复制自/, client],
-  ['client  liveness badge', /LivenessBadge|ops-badge online|\\u7AEF\\u53E3\\u53EF\\u8FBE|端口可达/, client],
+  // m05915 — the verdict is a lamp, not a word.
+  ['client  liveness lamp', /LivenessDot|ops-dot/, client],
+  ['client  the lamp is named so a screen reader still gets the verdict', /端口可达/, clientText],
   // m03664 — the log transcript moved into the same dialog. Match the compiled
   // shape: esbuild rewrites `h(` into `(0, import_react.createElement)(`, so a
   // source-shaped regex silently stops matching after a build.
@@ -162,6 +164,10 @@ const checks = [
   ['client  a captcha is labelled as work for a human, not a failure', /需人工完成/, clientText],
   ['client  the close button only appears when a window is open', /关闭窗口/, clientText],
   ['client  the card shows the verdict', /WebUiVerdict|ops-webui/, clientText],
+  // m05847 — the SSH path is renamed. (The layout it moved into is asserted
+  // below, next to panelCss, which is not in scope this early in the file.)
+  ['client  the SSH path is called CLI 登录', /CLI 登录/, clientText],
+  ['client  the login buttons carry a glyph', /CliIcon[\s\S]{0,4000}WebIcon|WebIcon[\s\S]{0,4000}CliIcon/, client],
 ]
 
 // m05105 — the manifest is what the loader reads BEFORE any code runs. It listed
@@ -259,6 +265,18 @@ for (const [name, hit] of [
   // fire on them and make this check useless.
   ['client  复制 no longer POSTs on click (m04031)', /const duplicate = async|void duplicate\(/.test(clientSrc)],
   ['client  bundle has no duplicate() call site (m04031)', /void duplicate\(|duplicate\(d\)/.test(client)],
+  // m05847 — both ways in sit on the name row, right-aligned.
+  ['client  the logins row exists and is right-aligned (m05847)', !/ops-dev-logins \{[^}]*margin-left: auto/.test(panelCss)],
+  ['client  the login buttons are a styled group (m05847)', !/ops-btn\.login \{/.test(panelCss)],
+  // m05901 — the address joined the name and the account/SSH/web port row is
+  // gone. Match the removed row's own selector, not the word "meta": the
+  // comment above still narrates why it went, and a blanket /meta/ would fire
+  // on that narration and make this check useless.
+  ['client  the address is shown with the name (m05901)', !/ops-dev-ip \{/.test(panelCss)],
+  ['client  the account/SSH/port row is gone (m05901)', /ops-dev-meta \{/.test(panelCss)],
+  // m04040's StatusBadge left the card: the CLI button now says 连接中… itself,
+  // and two indicators of one fact on a 400px row is noise.
+  ['client  the card no longer stacks a connecting badge (m05847)', /connectingId === d\.id \? h\(StatusBadge/.test(client)],
 ]) {
   console.log(`${hit ? '  MISS' : '  ok  '} ${name}`)
   if (hit) bad++
