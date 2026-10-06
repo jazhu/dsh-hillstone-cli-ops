@@ -244,7 +244,10 @@ for (const [name, re, hay] of checks) {
 // `confirm()` inside inlined xterm that guards its own external-link prompt.
 // Neither is a regression, and a gate that cries wolf on those gets deleted.
 // Match the decision, in the place the decision lives.
-const clientSrc = readFileSync(new URL('../src/client.tsx', import.meta.url), 'utf-8')
+// normalize line endings first: a checkout can leave src in CRLF, and the
+// panelCss template-literal regex below anchors on \n. Stripping \r keeps the
+// gate stable whether or not git's autocrlf conversion touched the working tree.
+const clientSrc = readFileSync(new URL('../src/client.tsx', import.meta.url), 'utf-8').replace(/\r\n/g, '\n')
 const panelCss = (clientSrc.match(/const panelCss = `([\s\S]*?)\n`\n/) || [, ''])[1]
 if (!panelCss) {
   console.log('  MISS client  could not extract panelCss from src/client.tsx')
