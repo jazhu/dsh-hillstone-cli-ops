@@ -2155,7 +2155,7 @@ function PolicyManager(): ReactElement {
           ),
           h('label', { className: 'ops-field', style: { gridColumn: '1 / -1' } },
             h('span', { className: 'ops-label' }, '命令模式', h('i', null, '每行一个，词边界匹配')),
-            h('textarea', { className: 'ops-input ops-textarea', rows: 5, value: form.commands, placeholder: 'reload\ndeleten\werase', onChange: (e: any) => setForm({ ...form, commands: e.target.value }) }),
+            h('textarea', { className: 'ops-input ops-textarea', rows: 5, value: form.commands, placeholder: 'reload\ndeleten\nerase', onChange: (e: any) => setForm({ ...form, commands: e.target.value }) }),
           ),
           h('label', { className: 'ops-field', style: { gridColumn: '1 / -1' } },
             h('span', { className: 'ops-label' }, '备注', h('i', null, '可选')),

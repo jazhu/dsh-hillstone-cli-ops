@@ -185,6 +185,22 @@
   .note.warn { border-color: rgba(248,81,73,.3); background: rgba(248,81,73,.06); }
   .note.warn b { color: var(--error); }
 
+  /* ---- screenshots ----
+     The panel is rendered at its real right-rail width (440 CSS px) and
+     captured at 2x, so these are the actual product pixels rather than a
+     mock. They are tall and narrow, so they sit in a two-up grid that
+     collapses to one column on small screens. */
+  .shots { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); margin: 18px 0 0; }
+  .shot { margin: 0; }
+  .shot img {
+    display: block; width: 100%; height: auto;
+    border: 1px solid var(--border-l2);
+    border-radius: var(--radius-md);
+    background: var(--layer-1);
+  }
+  .shot figcaption { margin-top: 8px; font-size: 12.5px; color: var(--label-caption); }
+  .shot figcaption b { color: var(--label-second); font-weight: 600; }
+
   /* ---- tool list ---- */
   ul.tools { list-style: none; margin: 0; padding: 0; display: grid; gap: 9px; }
   ul.tools li {
@@ -226,6 +242,7 @@
     .wrap { padding: 0 18px; }
     header.hero { padding: 52px 0 40px; }
     section { padding: 42px 0; }
+    .shots { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -242,9 +259,9 @@
     </p>
     <div class="cta">
       <a class="btn primary" href="https://github.com/jazhu/dsh-hillstone-cli-ops" target="_blank" rel="noopener">GitHub 仓库</a>
-      <a class="btn" href="docs/执行策略.md">执行策略文档</a>
-      <a class="btn" href="README.zh-CN.md">中文 README</a>
-      <a class="btn" href="README.md">English README</a>
+      <a class="btn" href="执行策略.md">执行策略文档</a>
+      <a class="btn" href="../README.zh-CN.md">中文 README</a>
+      <a class="btn" href="../README.md">English README</a>
     </div>
     <div class="meta">
       <span>版本 <code>1.0.0</code></span>
@@ -271,7 +288,7 @@
         <h4><span class="ico"></span>设备管理</h4>
         <p>设备的增删改查、搜索分页。名称行右侧是 <span class="tabname">CLI 登录</span> 与
            <span class="tabname">WebUI 登录</span> 两条入口，名称前有存活状态灯：绿=可达、
-           红=不可达，首次启动不显示。</p>
+           红=不可达，首次启动不显示。<a href="#设备管理">展开 →</a></p>
       </div>
       <div class="card">
         <h4><span class="ico g"></span>终端</h4>
@@ -279,17 +296,134 @@
       </div>
       <div class="card">
         <h4><span class="ico n"></span>日志</h4>
-        <p>每次连接的审计记录：谁连了哪台设备、输入了什么、执行了哪些命令、会话何时因何结束。</p>
+        <p>每次连接的审计记录：谁连了哪台设备、输入了什么、执行了哪些命令、会话何时因何结束。
+           <a href="#日志审计">展开 →</a></p>
       </div>
       <div class="card">
         <h4><span class="ico e"></span>执行策略</h4>
-        <p>由你书写的规则：时间窗口绑定命令模式，命中即在 agent 执行入口拒绝。对设备零影响。</p>
+        <p>由你书写的规则：时间窗口绑定命令模式，命中即在 agent 执行入口拒绝。对设备零影响。
+           <a href="#执行策略">展开 →</a></p>
       </div>
+    </div>
+
+    <figure class="shot" style="max-width:340px;margin-top:22px">
+      <img src="assets/03-终端.png" alt="终端页：顶部是连接选择与字体、清屏、断开工具条，主体是渲染真实设备输出的 xterm 终端" loading="lazy" />
+      <figcaption><b>终端</b>　多条活动连接可切换；字体、清屏、断开在同一条工具栏上</figcaption>
+    </figure>
+  </section>
+
+  <!-- ============ 设备管理 ============ -->
+  <section id="设备管理">
+    <h2>设备管理</h2>
+    <p class="lead">
+      设备列表要在一瞥之间回答两个问题：<b>这台设备现在还活着吗</b>，以及
+      <b>我（或助手）接下来怎么进去</b>。名称与 IP 合并成一行，账号 / SSH 端口 / Web 端口
+      收进编辑表单，不占列表的横向空间。
+    </p>
+
+    <div class="shots">
+      <figure class="shot">
+        <img src="assets/01-设备管理.png" alt="设备管理列表：三台设备，前两台绿灯在线、WAF 备机红灯离线，顶部有存活检测横幅" loading="lazy" />
+        <figcaption><b>设备列表</b>　存活状态灯常驻显示；「检测存活」跑完给出「2/3 台 SSH 端口可达」</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="assets/02-新增设备.png" alt="新增设备表单：设备名称、IP 地址、设备类型、账号、密码、SSH 端口、Web 端口、备注" loading="lazy" />
+        <figcaption><b>新增设备</b>　密码必填，设备类型决定徽章；SSH / Web 端口都有各自默认值</figcaption>
+      </figure>
+    </div>
+
+    <h3>存活状态灯</h3>
+    <p>
+      名称左侧的小圆点由面板的<b>「检测存活」</b>按钮驱动：它对每台设备的 SSH 端口做一次
+      <b>TCP 连接测试，不建立 SSH 会话</b>，因此不会触发设备的登录审计。
+      绿=可达并显示握手耗时，红=不可达，灰=检测中。鼠标悬停会给出
+      refused / timeout / unreachable 的<b>具体原因</b>——那才是让人知道下一步该做什么的信息。
+    </p>
+    <div class="note">
+      <b>为什么是手动触发，而不是定时轮询：</b>定期扫描所有 SSH 端口在带端口扫描检测的防火墙上
+      会被判定为攻击行为，运维人员自己的连接反而被封。所以「检测存活」是一个需要你点头的动作，
+      结果<b>常驻显示</b>，直到你重新检测。首次启动不显示——从未检测过不等于离线。
+    </div>
+
+    <h3>两条登录入口</h3>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>入口</th><th>做什么</th><th>结果</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="tabname">CLI 登录</span></td>
+            <td>宿主用 <code>ssh2</code> 建立 pty 会话，面板自动切到「终端」</td>
+            <td>一条出现在「终端」页的实时会话</td>
+          </tr>
+          <tr>
+            <td><span class="tabname">WebUI 登录</span></td>
+            <td>宿主开一个浏览器窗口并填好凭据登录设备管理页</td>
+            <td>卡片上回一个判定：<span class="yes">已连接</span> / 需要验证码 / 失败</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="margin-top:14px;font-size:13.5px;color:var(--label-caption)">
+      密码<b>只保存在宿主</b>，由宿主解密后使用，从不下发给面板前端，也从不写进任何返回值。
+      WebUI 登录失败<b>不自动重试</b>：StoneOS 在失败后要求图形验证码，反复尝试即使密码正确也会失败，
+      这时候需要你亲手去窗口里点一下。「复制」会以该设备的信息（含已保存的密码）预填新增表单，
+      适合批量录入同类设备——点保存才会真正创建。
+    </p>
+  </section>
+
+  <!-- ============ 日志审计 ============ -->
+  <section id="日志审计">
+    <h2>日志审计</h2>
+    <p class="lead">
+      agent 能连设备、能在设备上敲命令，所以「它到底做了什么」必须留下一条<b>事后可查</b>的记录。
+      每条 SSH 连接都会写一份审计日志，<b>即使你不在场</b>。
+    </p>
+
+    <div class="shots">
+      <figure class="shot">
+        <img src="assets/04-日志审计.png" alt="日志列表：四次连接记录，含设备名、进行中或已结束状态、connId、账号、开始时间、记录条数与结束原因" loading="lazy" />
+        <figcaption><b>连接列表</b>　进行中 / 已结束、账号、开始时间、记录条数与结束原因</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="assets/05-日志明细.png" alt="日志明细对话框：会话、开始时间、命令条数、设备类型，以及带来源标签的已连接事件与四条运维员命令" loading="lazy" />
+        <figcaption><b>会话明细</b>　每条记录标注来源：运维员 / agent / 系统</figcaption>
+      </figure>
+    </div>
+
+    <h3>记了什么</h3>
+    <p>
+      每次连接在 <code>&lt;dataDir&gt;/oplog/&lt;日期&gt;/&lt;connId&gt;.jsonl</code> 追加一份
+      JSONL：连接头（设备、账号、来源地址、窗口大小、开始时间）、每一条
+      <b>input / command / event</b>、以及结束行（结束时间、结束原因、总条数）。
+      逐键输入与整行命令分别记录，所以你能区分「<code>sho</code>」按了三次退格之后才敲成
+      <code>show version</code>，还是 agent 一次性下发了整条命令。保留最近 30 天。
+    </p>
+
+    <h3>来源标签是重点</h3>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>标签</th><th>代表</th></tr></thead>
+        <tbody>
+          <tr><td><code>运维员</code></td><td>你在「终端」页手敲的命令</td></tr>
+          <tr><td><code>agent</code></td><td>助手通过工具下发的命令，以及被策略拦下的尝试</td></tr>
+          <tr><td><code>系统</code></td><td>连接建立、断开、连接失败等宿主事件</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="margin-top:14px;font-size:13.5px;color:var(--label-caption)">
+      「逐键输入」默认<b>折叠</b>——原始按键流噪音很大，多数时候你要找的是「敲了哪些命令」。
+      需要复盘时再点开。
+    </p>
+
+    <div class="note">
+      <b>与「执行策略」的分工：</b>策略是<b>事前</b>拦截（命令根本没到达设备），日志是
+      <b>事后</b>留痕（谁在什么时候做了什么）。两者共享同一批 agent 入口：被拦下的尝试也会
+      留下一条带策略名与命中模式的 <code>agent</code> 事件，于是「它当时想干什么」同样可查。
     </div>
   </section>
 
   <!-- ============ 执行策略 ============ -->
-  <section>
+  <section id="执行策略">
     <h2>执行策略</h2>
     <p class="lead">
       网络设备上有一些命令，你绝不希望它在凌晨三点被执行——而下命令的正是助手。
@@ -360,6 +494,17 @@
       会话日志 <code>event</code>。<b>任何东西都不会到达设备</b>，因此没有「执行了一半」的
       状态需要收拾。调用方拿到的结果里明确标注 <code>blocked</code> 与原因，便于 agent
       向你转述。
+    </div>
+
+    <div class="shots">
+      <figure class="shot">
+        <img src="assets/06-执行策略.png" alt="执行策略列表：三条策略分别带每日 22:00–06:00 时间窗口、始终生效、以及已停用状态，命令模式以标签形式列出" loading="lazy" />
+        <figcaption><b>策略列表</b>　时间窗口摘要、启停开关、命令模式标签；停用的策略保留但不生效</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="assets/07-新增策略.png" alt="新增策略表单：策略名称、启用开关、开始与结束时间、时区、命令模式多行输入、备注" loading="lazy" />
+        <figcaption><b>新增策略</b>　命令模式每行一个，脚注直接写明词边界匹配的含义</figcaption>
+      </figure>
     </div>
   </section>
 

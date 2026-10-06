@@ -1,0 +1,10 @@
+{
+  "name": "dsh-hillstone-cli-ops-shots",
+  "private": true,
+  "type": "module",
+  "description": "Docs screenshot harness. Renders the REAL client bundle in Chromium against the REAL host bundle so docs/插件介绍.html shows the actual panel instead of hand-drawn mockups.",
+  "dependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  }
+}
