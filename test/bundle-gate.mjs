@@ -163,6 +163,10 @@ const checks = [
   ['host    the browser is launched with a persistent profile', /launchPersistentContext\(/, host],
   ['host    the operator keeps the window, so no headless mode', /headless: false/, host],
   ['host    self-signed device certs are tolerated', /ignoreHTTPSErrors: true/, host],
+  // A pinned viewport is what pushed StoneOS's bottom bar off-screen (m10068).
+  // It is silent: the window still opens, it just opens with the 登 录 button
+  // below the bottom edge of a 1382x864 laptop screen.
+  ['host    no pinned viewport, so the window fits the real screen', /viewport: null/, host],
   ['host    the verdict comes from the login response', /success === true|success === false/, host],
   ['host    a captcha demand is a verdict, not a retry', /captcha/, host],
   ['host    the web port falls back to 443', /DEFAULT_WEB_PORT = 443/, host],
@@ -344,6 +348,18 @@ for (const [name, hit] of [
   // The opaque/blur takeover stays rejected — a centred card is a placement
   // change, not permission to blur the conversation out from under the user.
   ['client  the dialog scrim grows a backdrop blur (m09852)', /ops-modal-scrim \{[^}]*backdrop-filter/.test(panelCss)],
+  // m10068 — the WebUI window was launched with `viewport: {1440, 900}`. A
+  // pinned viewport is also a pinned WINDOW: Playwright sizes the OS window to
+  // match AND reports those numbers to the page as `screen.*`, so on a 1382x864
+  // display a 1440x900 window is physically larger than the screen and its
+  // bottom bar — the 登 录 button — is off-display. Silent: the login still runs
+  // and the verdict is still "ready"; only the window is wrong.
+  // Stated as the bad condition, like the rest of this list.
+  ['host    a pinned viewport came back (m10068)', /viewport: \{ width: \d+, height: \d+ \}/.test(host)],
+  // The opposite mistake is worse: --start-maximized was added in the same edit
+  // under a diagnosis that turned out to be wrong, and a maximized window hides
+  // the size problem behind an OS-level setting the plugin does not control.
+  ['host    the WebUI window is force-maximized (m10068)', /--start-maximized/.test(host)],
 ]) {
   console.log(`${hit ? '  MISS' : '  ok  '} ${name}`)
   if (hit) bad++

@@ -43,7 +43,9 @@
   "scripts": {
     "build": "node build.mjs",
     "test": "node test/terminal-regression.mjs && node test/bundle-gate.mjs && node test/locale-gate.mjs",
-    "test:locale:negctl": "node test/negctl-locale.mjs"
+    "test:locale:negctl": "node test/negctl-locale.mjs",
+    "test:modal:negctl": "node test/negctl-modal-placement.mjs",
+    "test:webui:negctl": "node test/negctl-web-login-viewport.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

@@ -148,7 +148,24 @@ async function openWindow(device: Device, storeDir: string): Promise<LiveWindow>
       // Without this Chromium refuses the page outright, and the feature looks
       // like a broken network instead of the working login it is.
       ignoreHTTPSErrors: true,
-      viewport: { width: 1440, height: 900 },
+      // Do NOT pin a viewport here (this used to be 1440x900). A pinned viewport
+      // is also a pinned WINDOW: Playwright sizes the OS window to match it and
+      // reports the same numbers back to the page as `screen.*`. Measured on a
+      // 1382x864 display: pinned 1440x900 -> page believes screen=1440x900, and
+      // the real window is 58x36 px WIDER AND TALLER than the display. The
+      // window's lower-right region is simply off-screen, so StoneOS's bottom bar
+      // — the 登 录 button — is not visible (m10068).
+      //
+      // Note what is NOT the mechanism: the layout viewport was exactly 900px
+      // and a `position: fixed` footer sat at y=900, i.e. always inside it. The
+      // page could not scroll the button away. The cutting is done by the
+      // physical screen, not by overflow. Keep that distinction or the next
+      // reader will "fix" it with a scroll.
+      //
+      // `null` means "no override": the window takes the browser's own default
+      // for the real display (1050x709 measured on that same 1382x864 screen),
+      // which fits, and `screen.*` finally tells the device the truth.
+      viewport: null,
     })
   } catch (e) {
     const raw = (e as Error).message || String(e)

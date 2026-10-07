@@ -157,6 +157,29 @@ page is full of hundreds of unrelated form elements; and Playwright is loaded
 with a **dynamic** `import()` so a missing install fails one button press with a
 readable message instead of taking the whole host plugin down at load.
 
+### The WebUI window is not given a fixed size
+
+The window used to be launched with `viewport: { width: 1440, height: 900 }`.
+A pinned viewport is **also a pinned window**: Playwright sizes the OS window to
+match it, and reports the same numbers back to the page as `screen.*`. On the
+1382×864 display this was developed on, that made a window 58×36 px larger than
+the screen — its bottom bar, the one carrying StoneOS's 登 录 button, sat below
+the bottom edge and the operator saw a page they could not finish logging in
+from.
+
+The distinction that matters, and that the code comment now insists on: this was
+**not** an overflow problem. Measured, the layout viewport was exactly 900px
+tall and a `position: fixed` footer sat at `y=900` — always inside it, with
+nothing to scroll. The cutting was done by the physical screen. The fix is
+therefore `viewport: null` (the window takes the browser's own default for the
+real display, 1050×709 on that same screen) and **not** a scroll hack, and
+certainly not `--start-maximized`, which was tried in the same edit and removed
+once the measurement showed it was addressing a different problem.
+
+The failure was silent in the worst way: the login ran, the verdict came back
+ready, and the panel said nothing was wrong. `test/bundle-gate.mjs` now pins both
+halves, and `test/negctl-web-login-viewport.mjs` breaks each one in turn.
+
 ### `send_input` submits, but knows when not to
 
 A model that passes a bare command and waits for output is the overwhelmingly
