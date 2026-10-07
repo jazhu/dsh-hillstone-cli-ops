@@ -101,11 +101,16 @@ const checks = [
   ['client  pending connect switches to the terminal tab', /onRevealTerminal\(\(\) => setTab\(['"]terminal['"]\)\)/, client],
   // m03664 — the device dialog was covering the whole app: a full-viewport
   // centred overlay, a 40px backdrop blur, and window.confirm for deletes. The
-  // card is anchored to the right edge, the scrim is nearly transparent, and
-  // delete goes through the same dialog language. Each is asserted by ABSENCE
-  // below, because each one is a regression that a reader would not spot in
-  // the markup.
-  ['client  dialog is anchored to the right edge', /\.ops-modal-scrim \{[^}]*justify-content: flex-end/, client],
+  // scrim is nearly transparent, and delete goes through the same dialog
+  // language. Each is asserted by ABSENCE below, because each one is a
+  // regression that a reader would not spot in the markup.
+  //
+  // The centring itself was tried, rejected and now restored: m09852 centres the
+  // card again because an edge-hung form reads as a sidebar panel rather than a
+  // dialog about the device. So the placement assertion moved DOWN to the
+  // negative list (a centred dialog is now the expected state), and what m03664
+  // was actually protecting — the blur, the opaque takeover, window.confirm —
+  // stayed. Centre the card; do not let the scrim swallow the conversation.
   ['client  scrim does not swallow clicks', /\.ops-modal-scrim \{[^}]*pointer-events: none/, client],
   ['client  search box', /\.ops-search \{/, client],
   ['client  device list paginates', /\.ops-pager \{/, client],
@@ -330,6 +335,15 @@ for (const [name, hit] of [
   // explaining why the box went away, so a blanket /h\('input'/ is useless here.
   ['client  the window bounds are still <input> (m09323)', /h\('input'[^\n]*value: form\.(start|end)/.test(clientSrc)],
   ['client  the HH:MM placeholders came back (m09323)', /placeholder: '22:00'|placeholder: '06:00'/.test(clientSrc)],
+  // m09852 — the dialog is centred again, matching the host's alert dialogs.
+  // Anchor on the scrim's own box model: the right-anchored version carried
+  // `justify-content: flex-end` plus an asymmetric padding, and a blanket
+  // /flex-end/ would also fire on any unrelated rule that happens to use it.
+  ['client  the dialog scrim is right-anchored again (m09852)', /ops-modal-scrim \{[^}]*justify-content: flex-end/.test(panelCss)],
+  ['client  the dialog scrim still has an edge padding offset (m09852)', /ops-modal-scrim \{[^}]*padding: [^;]*\d+px 8px/.test(panelCss)],
+  // The opaque/blur takeover stays rejected — a centred card is a placement
+  // change, not permission to blur the conversation out from under the user.
+  ['client  the dialog scrim grows a backdrop blur (m09852)', /ops-modal-scrim \{[^}]*backdrop-filter/.test(panelCss)],
 ]) {
   console.log(`${hit ? '  MISS' : '  ok  '} ${name}`)
   if (hit) bad++

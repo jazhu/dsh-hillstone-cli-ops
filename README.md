@@ -266,6 +266,28 @@ the exact bug being fixed. Re-opening a tab that already exists only focuses it
 and never expands the column, hence the `isExpanded()` / `toggleExpanded()`
 fallback.
 
+### A dialog sits in the middle, but the scrim stays polite
+
+The three dialogs (new device, new policy, session detail) are centred on the
+**window**, matching DSH's own alert-centre settings dialog. This reversed an
+earlier decision: the dialog used to be pinned to the right edge of the panel,
+on the grounds that it "does not interrupt reading". In use it read as a sidebar
+overlay rather than a dialog, and finding it meant looking across the whole
+screen.
+
+The scrim still does not take over. No `backdrop-filter` blur, no dimming — one
+click on the background closes it, and Esc does too. Centring answers *where the
+dialog is*; it does not mean *the dialog must be dealt with*. Those are two
+decisions, and keeping them apart is what stops "more visible" from quietly
+becoming "more insistent". The m03636 refusal of blur / takeover / mandatory
+confirm still holds.
+
+The screenshot-only consequence is worth stating: the dialog is portalled to
+`<body>` and centred on the **window**, while the panel itself is only 440px
+wide. At 440px, "centred" and "full width" are the same picture, so the three
+dialog shots in `docs/assets/` are taken at **1280px app width**; the other four
+are rail-width. `docs/assets/README.txt` records which is which.
+
 ### A connection lands you on 终端, not on 设备管理
 
 Opening the panel is only half the job. The tab body is mounted by the sidebar,

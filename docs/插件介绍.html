@@ -200,6 +200,13 @@
   }
   .shot figcaption { margin-top: 8px; font-size: 12.5px; color: var(--label-caption); }
   .shot figcaption b { color: var(--label-second); font-weight: 600; }
+  /* A dialog is portalled to the document root and centred on the WINDOW, so
+     its shot is taken at app width (1280) rather than rail width. Inside the
+     two-column grid that would be squeezed next to a tall narrow rail shot, so
+     dialog figures break out to the full page width. */
+  .shot.wide { grid-column: 1 / -1; }
+  .shot.wide img { max-width: 860px; margin: 0 auto; }
+  .shot.wide figcaption { max-width: 860px; margin-left: auto; margin-right: auto; }
 
   /* ---- tool list ---- */
   ul.tools { list-style: none; margin: 0; padding: 0; display: grid; gap: 9px; }
@@ -326,9 +333,9 @@
         <img src="assets/01-设备管理.png" alt="设备管理列表：三台设备，前两台绿灯在线、WAF 备机红灯离线，顶部有存活检测横幅" loading="lazy" />
         <figcaption><b>设备列表</b>　存活状态灯常驻显示；「检测存活」跑完给出「2/3 台 SSH 端口可达」</figcaption>
       </figure>
-      <figure class="shot">
-        <img src="assets/02-新增设备.png" alt="新增设备表单：设备名称、IP 地址、设备类型、账号、密码、SSH 端口、Web 端口、备注" loading="lazy" />
-        <figcaption><b>新增设备</b>　密码必填，设备类型决定徽章；SSH / Web 端口都有各自默认值</figcaption>
+      <figure class="shot wide">
+        <img src="assets/02-新增设备.png" alt="新增设备表单，居中显示在 DSH 窗口中央：设备名称、IP 地址、设备类型、账号、密码、SSH 端口、Web 端口、备注；左侧仍可见设备列表" loading="lazy" />
+        <figcaption><b>新增设备</b>　密码必填，设备类型决定徽章；SSH / Web 端口都有各自默认值。弹窗居中于窗口，右栏仍可被看到</figcaption>
       </figure>
     </div>
 
@@ -384,9 +391,9 @@
         <img src="assets/04-日志审计.png" alt="日志列表：四次连接记录，含设备名、进行中或已结束状态、connId、账号、开始时间、记录条数与结束原因" loading="lazy" />
         <figcaption><b>连接列表</b>　进行中 / 已结束、账号、开始时间、记录条数与结束原因</figcaption>
       </figure>
-      <figure class="shot">
-        <img src="assets/05-日志明细.png" alt="日志明细对话框：会话、开始时间、命令条数、设备类型，以及带来源标签的已连接事件与四条运维员命令" loading="lazy" />
-        <figcaption><b>会话明细</b>　每条记录标注来源：运维员 / agent / 系统</figcaption>
+      <figure class="shot wide">
+        <img src="assets/05-日志明细.png" alt="日志明细对话框，居中显示在 DSH 窗口中央：会话、开始时间、命令条数、设备类型，以及带来源标签的已连接事件与运维员命令" loading="lazy" />
+        <figcaption><b>会话明细</b>　每条记录标注来源：运维员 / agent / 系统。点击列表行才打开，不自动弹出</figcaption>
       </figure>
     </div>
 
@@ -501,9 +508,9 @@
         <img src="assets/06-执行策略.png" alt="执行策略列表：三条策略分别带每日 22:00–06:00 时间窗口、始终生效、以及已停用状态，命令模式以标签形式列出" loading="lazy" />
         <figcaption><b>策略列表</b>　时间窗口摘要、启停开关、命令模式标签；停用的策略保留但不生效</figcaption>
       </figure>
-      <figure class="shot">
-        <img src="assets/07-新增策略.png" alt="新增策略表单：策略名称、启用开关、开始与结束时间下拉（15 分钟步进）、命令模式多行输入、备注" loading="lazy" />
-        <figcaption><b>新增策略</b>　命令模式每行一个，脚注直接写明词边界匹配的含义</figcaption>
+      <figure class="shot wide">
+        <img src="assets/07-新增策略.png" alt="新增策略表单，居中显示在 DSH 窗口中央：策略名称、启用开关、开始与结束时间下拉（15 分钟步进）、命令模式多行输入、备注；左侧仍可见策略列表" loading="lazy" />
+        <figcaption><b>新增策略</b>　命令模式每行一个，脚注直接写明词边界匹配的含义。弹窗居中于窗口</figcaption>
       </figure>
     </div>
   </section>
@@ -566,6 +573,24 @@
       <code>sessions.onScreen</code> 解析。所以每条连接都带上「是谁发起的」这个身份
       （<code>originSessionId</code>），并把展开动作路由到那个会话——否则 agent 在你读
       <i>另一个</i>对话时去连设备，终端会弹到那里去。
+    </p>
+
+    <h3>弹窗居中，遮罩保持克制</h3>
+    <p>
+      三个弹窗（新增设备 / 新增策略 / 会话明细）都<b>居中于整个窗口</b>，与 DSH 自带的
+      告警中心设置弹窗一致。这一点改过一次：早期版本把弹窗贴在右栏边缘，理由是
+      「不打断阅读」。实测那样更像一块侧栏浮层而不是对话框，而且视线要横跨整屏才能
+      找到它。
+    </p>
+    <p>
+      但<b>遮罩仍然不接管</b>：背景没有模糊、也没有压暗，点它可以直接关掉弹窗，Esc 同样
+      有效。居中只是决定「弹窗在哪」，不等于「必须先处理弹窗」。这两种决定要分开做，
+      否则一个「更醒目」很容易滑向一个「更强势」。
+    </p>
+    <p>
+      截图也印证了这件事：弹窗那几张是在 <b>1280px 的整窗宽度</b>下拍的，而不是右栏的
+      440px。因为弹窗挂在 <code>&lt;body&gt;</code> 上、以<b>窗口</b>为中心——在 440px 宽里
+      「居中」和「撑满」是同一张图，居中的回归根本拍不出来。
     </p>
   </section>
 

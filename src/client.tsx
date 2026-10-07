@@ -392,17 +392,25 @@ const panelCss = `
    context and a fixed overlay painted in place would slip under the host's own
    chrome.
 
-   The card is anchored to the RIGHT edge and the scrim is deliberately almost
-   transparent (m03664). Two earlier attempts hurt: a full-viewport centred
-   overlay made the dialog feel like a system modal taking over the whole app,
-   and a 40px background blur behind the scrim — copied from the host's own menu
-   styling — smeared the entire conversation into an unreadable wash. An ops
-   dialog is context, not a takeover: the main UI stays legible and clickable
-   underneath, and the card sits next to the panel that opened it so the eye does
-   not have to travel. Clicks on the app behind still reach the app. */
-.ops-modal-scrim { position: fixed; inset: 0; z-index: 1100; display: flex; align-items: center; justify-content: flex-end; padding: 32px 32px 32px 8px; box-sizing: border-box; background: var(--dsw-alias-bg-mask-2, #00000008); pointer-events: none; }
+   Centred, and modelled on the host's own alert dialogs (m09852). This reverses
+   m03664, which anchored the card to the RIGHT edge so it sat next to the panel
+   that opened it. The reason that no longer holds: an edit form that hangs off
+   the edge reads as a panel of the ops sidebar rather than a dialog about the
+   device, and the eye has to travel from the card it came from across the whole
+   window. The scrim stays almost transparent and non-blocking (the scrim opts
+   out of pointer events, the card restores them) so the conversation underneath
+   is still readable and clickable — a centred position does not require a
+   takeover, and the earlier "covers the entire application" complaint was aimed
+   at the opaque backdrop and the blur, not at the placement.
+
+   The 40px background blur stayed out for good: smeared over a full-viewport
+   scrim it turned the conversation into an unreadable wash. The right-edge
+   justification and its asymmetric padding are gone with it — a centred card
+   needs neither, and leaving them would silently re-anchor it on the next edit.
+   Clicks on the app behind still reach the app. */
+.ops-modal-scrim { position: fixed; inset: 0; z-index: 1100; display: flex; align-items: center; justify-content: center; background: var(--dsw-alias-bg-mask-2, #00000008); pointer-events: none; }
 .ops-modal-scrim > .ops-modal { pointer-events: auto; }
-.ops-modal { width: min(480px, 100%); max-height: min(84vh, 760px); display: flex; flex-direction: column; box-sizing: border-box; border: 1px solid var(--dsw-alias-border-l2, #2a2a36); border-radius: var(--dsw-radius-lg, 16px); background: var(--dsw-alias-bg-layer-1, #232324); box-shadow: var(--dsw-shadow-lv4, 0 0 1px 0 #0000001a, 0 16px 48px 0 #00000033); overflow: hidden; animation: ops-modal-in .12s var(--ds-ease-in-out, ease); }
+.ops-modal { width: min(480px, calc(100vw - 48px)); max-height: min(84vh, 760px); display: flex; flex-direction: column; box-sizing: border-box; border: 1px solid var(--dsw-alias-border-l2, #2a2a36); border-radius: var(--dsw-radius-lg, 16px); background: var(--dsw-alias-bg-layer-1, #232324); box-shadow: var(--dsw-shadow-lv4, 0 0 1px 0 #0000001a, 0 16px 48px 0 #00000033); overflow: hidden; animation: ops-modal-in .12s var(--ds-ease-in-out, ease); }
 .ops-modal-head { display: flex; align-items: center; gap: 8px; padding: 13px 16px; border-bottom: .5px solid var(--dsw-alias-border-l1, #ffffff0f); }
 .ops-modal-head b { font-size: 14px; line-height: 22px; font-weight: 600; color: var(--dsw-alias-label-primary, #f9fafb); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ops-modal-close { margin-left: auto; width: 26px; height: 26px; padding: 0; font-size: 13px; line-height: 1; }
