@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Hillstone 设备运维",
+    "description": "管理 Hillstone / StoneOS 设备：设备台账与存活探测、SSH 终端、连接审计日志，以及限定 agent 不得执行哪些命令的执行策略。"
+  }
+}

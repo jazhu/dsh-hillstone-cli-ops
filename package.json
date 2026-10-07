@@ -1,6 +1,6 @@
 {
   "name": "dsh-hillstone-cli-ops",
-  "displayName": "DSH Hillstone CLI 运维",
+  "displayName": "Hillstone 设备运维",
   "description": "设备运维终端插件：右侧栏「设备运维」标签页，管理 Hillstone / StoneOS 设备（增删改查 + 搜索分页 + 端口存活探测 + SSH 终端 + 连接审计日志），提供「执行策略」让用户自建命令限制规则（时间窗口 + 命令模式，命中即在 agent 执行入口拒绝），并向 agent 提供 9 个 hillstone_* 运维工具。连接成功后自动切到终端页，agent 触发的连接会展开到发起它的那个会话。",
   "version": "1.0.0",
   "type": "module",
@@ -10,10 +10,12 @@
     ".": "./dist/index.mjs",
     "./client": "./dist/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json",
     "./package.json": "./package.json"
   },
   "files": [
     "dist",
+    "locale",
     "cordis.patch.yml"
   ],
   "dsh": {
@@ -39,7 +41,9 @@
     "terminal"
   ],
   "scripts": {
-    "build": "node build.mjs"
+    "build": "node build.mjs",
+    "test": "node test/terminal-regression.mjs && node test/bundle-gate.mjs && node test/locale-gate.mjs",
+    "test:locale:negctl": "node test/negctl-locale.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Hillstone Device Ops",
+    "description": "Hillstone / StoneOS device operations: manage devices, open SSH terminals, review connection audit logs, and limit the commands the agent may run."
+  }
+}
