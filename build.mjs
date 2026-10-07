@@ -8,14 +8,26 @@
  * `react`, `react-dom`, and `react/jsx-runtime` are externalized: the harness
  * provides them at runtime as baseline module-table entries.
  *
- * `ssh2` is a Node-only native-ish module: it stays external in the host build
- * and resolves from node_modules at runtime.
+ * `ssh2` is INLINED into the host bundle, together with its whole pure-JS
+ * dependency closure (asn1, bcrypt-pbkdf, tweetnacl, safer-buffer). Rationale:
+ * a DSH bundle is portable only if its host half imports with no node_modules
+ * beside it. A `link:` install — and any folder copied to another machine —
+ * never installs the package's own dependencies (pnpm does not install a linked
+ * package's deps), so an external `import "ssh2"` becomes
+ * `Error: Cannot find module 'asn1'` at Loader import time, which leaves the
+ * entry with no fiber, which makes the `dsh.client` scan skip it, which silently
+ * removes the whole plugin (host half, client half, right-rail tab). Inlining
+ * deletes that failure mode instead of documenting it.
  *
- * `playwright` is the same story for a different reason: it must stay external
- * so its ~100MB of bundled browser-management code never lands in dist/index.mjs,
- * and so a missing install is a catchable error on one button press (see
- * src/web-login.ts's dynamic import) rather than a load-time failure of the
- * whole host plugin.
+ * `cpu-features` stays external on purpose: it is ssh2's OPTIONAL native
+ * acceleration, required inside a try/catch (ssh2/lib/protocol/constants.js), so
+ * a machine without it — or without a toolchain to build it — quietly gets the
+ * pure-JS cipher path instead of a build or load failure.
+ *
+ * `playwright` stays external for a different reason: it must stay out of
+ * dist/index.mjs (~100MB of browser-management code), and a missing install must
+ * be a catchable error on one button press (see src/web-login.ts's dynamic
+ * import) rather than a load-time failure of the whole host plugin.
  *
  * `xterm` / `xterm-addon-fit` are INLINED into the client bundle (NOT external).
  * Reason: DSH's client module-table seed only exposes react/react-dom and the
@@ -42,7 +54,26 @@ await build({
   platform: 'node',
   target: ['node22'],
   sourcemap: true,
-  external: [...dshExternal, 'ssh2', 'playwright'],
+  // ssh2 is deliberately NOT external (see the module comment above): its
+  // pure-JS closure is inlined so the host half imports with no node_modules.
+  // `cpu-features` is ssh2's optional native extra — keep it out of the bundle.
+  external: [...dshExternal, 'playwright', 'cpu-features'],
+  // Inlined CJS reaches for builtins through a *dynamic* require (`crypto` is
+  // assigned inside a function, the optional native binding by a computed
+  // relative path), which esbuild cannot rewrite into static imports. In an ESM
+  // output its `__require` shim throws `Dynamic require of "crypto" is not
+  // supported` unless a real `require` exists in scope — so give it one. This is
+  // the difference between "ssh2 is in the file" and "ssh2 runs".
+  banner: {
+    js: [
+      "import { createRequire as __dshCreateRequire } from 'node:module';",
+      "import { fileURLToPath as __dshFileURLToPath } from 'node:url';",
+      "import { dirname as __dshDirname } from 'node:path';",
+      'const require = __dshCreateRequire(import.meta.url);',
+      'const __filename = __dshFileURLToPath(import.meta.url);',
+      'const __dirname = __dshDirname(__filename);',
+    ].join('\n'),
+  },
   logLevel: 'info',
 })
 

@@ -134,8 +134,23 @@ async function openWindow(device: Device, storeDir: string): Promise<LiveWindow>
   // A dynamic import, not a static one: esbuild keeps this external, and a
   // missing or broken playwright becomes a catchable error on one button press
   // instead of a load-time failure of the whole host plugin. Nothing else in
-  // this plugin needs a browser.
-  const { chromium } = await import('playwright')
+  // this plugin needs a browser. `playwright` is the only runtime dependency the
+  // package still declares (ssh2 and xterm are inlined into dist at build time),
+  // and it is the one dependency a plugin directory copied to another machine
+  // will NOT have — so name that failure too, instead of leaking
+  // `ERR_MODULE_NOT_FOUND: Cannot find package 'playwright'`.
+  let chromium: (typeof import('playwright'))['chromium']
+  try {
+    ;({ chromium } = await import('playwright'))
+  } catch (e) {
+    const raw = (e as Error).message || String(e)
+    const missing = /Cannot find package 'playwright'|ERR_MODULE_NOT_FOUND/i.test(raw)
+    throw new Error(
+      missing
+        ? '缺少 playwright：WebUI 登录需要它，但插件目录里没有安装。请在该插件目录执行 `pnpm add playwright && npx playwright install chromium`。'
+        : `加载 playwright 失败：${raw.split('\n')[0]}`,
+    )
+  }
   const userDataDir = join(storeDir, PROFILE_DIR, device.id)
   mkdirSync(userDataDir, { recursive: true })
   const url = webLoginUrl(device)

@@ -66,29 +66,74 @@ https://<设备 IP>:<Web 端口，未填则 443>/
 
 ## 安装
 
-```bash
-git clone https://github.com/jazhu/dsh-hillstone-cli-ops
-cd dsh-hillstone-cli-ops
-pnpm install
-pnpm run build          # 重新生成 dist/（不入库）
-```
+**插件旁边不需要装任何东西。** 构建产物 `dist/index.mjs` 里已经内联了 ssh2 及其整套纯 JS 依赖
+（asn1、bcrypt-pbkdf、tweetnacl、safer-buffer），所以即使插件目录旁没有 `node_modules`，宿主半边
+也能加载——`link:` 方式安装的 profile、或者整个目录被拷到另一台机器，产生的正是这种情况。
+`xterm` 同样内联进了 `dist/client.js`。唯一需要外部依赖的功能是 WebUI 登录按钮，它用
+`playwright`，声明为**可选依赖**。
 
-然后把 DSH 指向这个目录——既可以在插件管理器里作为本地 bundle，也可以把包装进你的 profile：
+### 用 tarball 或 npm 安装——目标机器不需要构建
+
+`files` 里包含 `dist/`、`locale/` 和 `cordis.patch.yml`，所以装上的就是构建好的产物：
 
 ```bash
 pnpm pack && <你的 dsh 插件安装命令> ./dsh-hillstone-cli-ops-1.0.0.tgz
 ```
 
+### 用 git 安装——放行一次，包会自己构建
+
+`dist/` 是构建产物、不入库，所以包里声明了 `"prepare": "node build.mjs"`，安装时由它自己构建。
+pnpm ≥ 10 默认拒绝执行 git 依赖的生命周期脚本，除非你放行这个包，所以第一次
+`dsh plugin add github:jazhu/dsh-hillstone-cli-ops#<sha>` 会停下来并打印需要放行的包名。把它写进
+你 profile 的 `pnpm-workspace.yaml` 后再装一次：
+
+```yaml
+allowBuilds:
+  dsh-hillstone-cli-ops: true
+```
+
+请锁定 commit：这个开关意味着「允许该包在安装时于你的机器上执行代码」，且运行在 agent 沙箱之外。
+用 tarball 或 npm 安装不需要任何放行，因为它分发的是构建好的产物。
+
+### 用源码 checkout（开发）
+
+```bash
+git clone https://github.com/jazhu/dsh-hillstone-cli-ops
+cd dsh-hillstone-cli-ops
+pnpm install          # `prepare` 会构建 dist/
+pnpm test
+```
+
 **装完请重启 DSH 主进程。** 停用再启用插件不会重建运行中进程的宿主 fiber，所以新的宿主代码
 （SSH 处理、工具、日志写入）只有在真正重启后才生效。
 
-环境要求：Node 22+；一个暴露了 `tools`、`slots`、`sidebarRightTabs`、`sidebarRight`、
-`uiWorkspace` 这些服务的 DSH 版本；以及 `ssh2` / `xterm`（由 `pnpm install` 装好）。
+环境要求：Node 22+（已写进 `engines`）；一个暴露了 `tools`、`slots`、`sidebarRightTabs`、
+`sidebarRight`、`uiWorkspace` 这些服务的 DSH 版本。运行时**不需要**再安装 `ssh2` / `xterm`——
+它们已经内联进 `dist/`，现在只是构建期的 devDependencies。
 
-`package.json` 在 `dsh.client.inject` 里列出客户端需要的服务，这个列表是有约束力的：它正是
-loader 在任何代码运行之前读取的东西。客户端半边自己的 `export const inject` 与这份 manifest 是
-**同一个事实的两个独立陈述**，所以 `test/bundle-gate.mjs` 会比对它们，一旦漂移就让门禁失败。
-你新增服务时记得两处一起改。
+### WebUI 登录需要 Playwright
+
+`hillstone_web_login` 是唯一无法内联的运行时导入：它会动态 `import('playwright')` 并驱动一个
+真实的 Chromium 窗口。tarball / npm 安装会自动带上 playwright；`link:` 安装或拷贝目录则不会，
+所以要在插件所在目录里装一次：
+
+```bash
+pnpm add playwright
+npx playwright install chromium
+```
+
+没有它，其余功能——设备管理、SSH 终端、agent 工具、审计日志——全部照常工作，按钮会告诉你该执行
+什么命令，而不是让插件加载失败。
+
+`package.json` 里的 `dsh.client.inject` 是客户端**加载顺序**声明，里面的名字指的是客户端入口 id
+（包名，例如 `@deepseek-ai/dsh-client-ui-conversation`）；组合器只解析它认识的名字，其余直接忽略。
+这个插件真正绑定的服务来自客户端模块自己的 `export const inject`——`slots`、
+`sidebarRightTabs`、`sidebarRight`、`uiWorkspace`——`test/bundle-gate.mjs` 会拿声明列表与它比对，
+所以你新增服务时记得两处一起改。
+
+`test/portability-gate.mjs` 把上面这一整套约束变成了门禁：它在临时目录里用
+`node_modules/<包名>` junction 摆出 `package.json`、`cordis.patch.yml`、`locale/`、`dist/`，断言
+那里**解析不到** `ssh2`，然后从这个舞台目录导入宿主 bundle。
 
 ---
 
@@ -289,11 +334,24 @@ node node_modules/typescript/bin/tsc --noEmit   # 类型检查（build.mjs 不�
 node build.mjs                                  # esbuild 双产物构建
 node test/terminal-regression.mjs               # 离线端到端
 node test/bundle-gate.mjs                       # 对构建产物做特征断言
+node test/locale-gate.mjs                       # 语言文件与代码一致
+node test/portability-gate.mjs                  # 只有 files 里的文件、没有 node_modules 时能否加载
 ```
 
-请按这个顺序运行。`bundle-gate` 断言的是 `dist/`，所以一次失败的构建否则会让它在**上一次的
-产物**上照样通过——它会比较 `dist/*` 与 `src/**` + `build.mjs` 的 mtime，并报
-`MISS … (STALE)`。
+请按这个顺序运行（`pnpm test` 一次跑完后四个）。`bundle-gate` 断言的是 `dist/`，所以一次失败的
+构建否则会让它在**上一次的产物**上照样通过——它会比较 `dist/*` 与 `src/**` + `build.mjs` 的
+mtime，并报 `MISS … (STALE)`。
+
+`test/portability-gate.mjs` 是唯一能看见其他门禁看不见的那类故障的门禁：它只把 `files` 里声明的
+文件摆进临时目录（并用 `node_modules/<包名>` junction 挂上），断言那里**解析不到** `ssh2`，再从
+这个舞台目录导入宿主 bundle。其他门禁都是在**原地**跑产物、原地 grep，而原地有完整的
+`node_modules`，足以掩盖一个缺失的运行时依赖——这正是「本地测试全绿、换台机器却报
+`Cannot find module 'asn1'`」的成因。
+
+如果你把整个目录拷到另一台机器，要留意 pnpm 的软链接被「拍平」：普通文件复制会把
+`node_modules/` 下的链接变成真实目录，于是顶层的 `ssh2` 再也看不到它自己的 `asn1` /
+`bcrypt-pbkdf` 兄弟。构建产物 `dist/` 不受影响（ssh2 已经在里面了），但 `tsc` 和
+`test/terminal-regression.mjs` 受影响；`pnpm install --force` 可以恢复这些链接。
 
 `test/terminal-regression.mjs` 会拿真实的 `dist/index.mjs` 对上一个自建的假 StoneOS（走真实
 `ssh2`），其中包含一个会在 ` --More--` 处停下、并**吞掉**在那里输入的任何东西的假分页器——

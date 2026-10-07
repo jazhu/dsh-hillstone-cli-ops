@@ -1,4 +1,10 @@
 allowBuilds:
-  cpu-features: set this to true or false
+  # ssh2's optional native accelerant. It needs a C++ toolchain and fails to
+  # configure on a plain machine (gyp ERR! configure error), and ssh2 requires it
+  # inside a try/catch: refusing to build it just selects the pure-JS cipher path.
+  # Nothing in this package needs the binding -- ssh2 itself is inlined into
+  # dist/index.mjs at build time (see build.mjs).
+  cpu-features: false
+  # esbuild's postinstall fetches the platform binary. Required: it is the build.
   esbuild: true
-  ssh2: set this to true or false
+  ssh2: false

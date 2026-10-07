@@ -81,33 +81,87 @@ run `npx playwright install chromium` once.
 
 ## Install
 
-```bash
-git clone https://github.com/jazhu/dsh-hillstone-cli-ops
-cd dsh-hillstone-cli-ops
-pnpm install
-pnpm run build          # regenerates dist/ (not committed)
-```
+**Nothing has to be installed next to the plugin.** The built `dist/index.mjs`
+carries ssh2 and its whole pure-JS dependency closure (asn1, bcrypt-pbkdf,
+tweetnacl, safer-buffer) inside it, so the host half loads even where there is no
+`node_modules` beside it — which is exactly what a `link:` profile or a folder
+copied to another machine produces. `xterm` is inlined into `dist/client.js` the
+same way. Only the WebUI-login button needs something from the outside:
+`playwright`, declared as an *optional* dependency.
 
-Then point DSH at the directory — either as a local bundle in the plugin
-manager, or by installing the package into your profile:
+### From a tarball or npm — the target machine builds nothing
+
+`files` ships `dist/`, `locale/` and `cordis.patch.yml`, so the package arrives
+prebuilt and ready to load:
 
 ```bash
 pnpm pack && <your-dsh-plugin-install-command> ./dsh-hillstone-cli-ops-1.0.0.tgz
+```
+
+### From git — the package builds itself once you allow it
+
+`dist/` is a build artifact and is not committed, so the package declares
+`"prepare": "node build.mjs"` and builds itself during install. pnpm ≥ 10 refuses
+to run a git dependency's lifecycle scripts until you allow that package, so the
+first `dsh plugin add github:jazhu/dsh-hillstone-cli-ops#<sha>` stops and prints
+the key to allowlist. Add it to your profile's `pnpm-workspace.yaml` and install
+again:
+
+```yaml
+allowBuilds:
+  dsh-hillstone-cli-ops: true
+```
+
+Pin the commit: that flag lets the package execute code on your machine at
+install time, outside the agent sandbox. A tarball or npm install needs no such
+permission, because it ships the built output.
+
+### From a checkout (development)
+
+```bash
+git clone https://github.com/jazhu/dsh-hillstone-cli-ops
+cd dsh-hillstone-cli-ops
+pnpm install          # `prepare` builds dist/
+pnpm test
 ```
 
 **Restart the DSH main process afterwards.** Disabling and re-enabling a plugin
 does not rebuild the host fiber in a running process, so new host code (SSH
 handling, the tools, the log writer) only takes effect on a real restart.
 
-Requirements: Node 22+, a DSH build that exposes the `tools`, `slots`,
-`sidebarRightTabs`, `sidebarRight` and `uiWorkspace` services, and `ssh2` /
-`xterm` (installed by `pnpm install`).
+Requirements: Node 22+ (declared in `engines`) and a DSH build that exposes the
+`tools`, `slots`, `sidebarRightTabs`, `sidebarRight` and `uiWorkspace` services.
+No `ssh2` or `xterm` install is needed at runtime — both are inlined into `dist/`
+and are build-time devDependencies now.
 
-`package.json` lists the client services under `dsh.client.inject`, and that list
-is load-bearing: it is what the loader reads before any code runs. The client
-half's own `export const inject` and the manifest are two independent statements
-of the same fact, so `test/bundle-gate.mjs` compares them and fails when they
-drift. Keep both in step when you add a service.
+### WebUI login needs Playwright
+
+`hillstone_web_login` is the one feature whose import cannot be inlined: it
+dynamically imports `playwright` and drives a real Chromium window. A tarball or
+npm install pulls playwright in automatically; a `link:` install or a copied
+folder does not, so put it where the plugin lives:
+
+```bash
+pnpm add playwright
+npx playwright install chromium
+```
+
+Everything else — devices, SSH terminals, the agent tools, the audit log — works
+without it, and the button reports what to run instead of the plugin failing to
+load.
+
+`dsh.client.inject` in `package.json` is the client-side load-order declaration.
+The names in it denote *client entry ids* (package names such as
+`@deepseek-ai/dsh-client-ui-conversation`); the composition resolves the names it
+recognises and ignores the rest. The services this plugin actually binds come from
+the client module's own `export const inject` — `slots`, `sidebarRightTabs`,
+`sidebarRight`, `uiWorkspace` — and `test/bundle-gate.mjs` checks the declared
+list against that export, so keep the two in step when you add a service.
+
+`test/portability-gate.mjs` enforces this whole story: it stages `package.json`,
+`cordis.patch.yml`, `locale/` and `dist/` in a temp directory behind a
+`node_modules/<name>` junction, asserts `ssh2` is *not* resolvable there, and
+imports the host bundle from that stage.
 
 ---
 
@@ -375,11 +429,28 @@ node node_modules/typescript/bin/tsc --noEmit   # typecheck (build.mjs does NOT 
 node build.mjs                                  # esbuild dual bundle
 node test/terminal-regression.mjs               # offline end-to-end
 node test/bundle-gate.mjs                       # greps the built product
+node test/locale-gate.mjs                       # locale files agree with the code
+node test/portability-gate.mjs                  # the shipped files load with no node_modules
 ```
 
-Run them in that order. `bundle-gate` asserts against `dist/`, so a failed build
-would otherwise leave it passing on the previous artefacts — it compares the
-mtimes of `dist/*` against `src/**` + `build.mjs` and reports `MISS … (STALE)`.
+Run them in that order (`pnpm test` runs the last four in one go). `bundle-gate`
+asserts against `dist/`, so a failed build would otherwise leave it passing on the
+previous artefacts — it compares the mtimes of `dist/*` against `src/**` +
+`build.mjs` and reports `MISS … (STALE)`.
+
+`test/portability-gate.mjs` is the one gate that can see the failure the others
+cannot: it stages only what `files` ships behind a `node_modules/<name>` junction,
+asserts `ssh2` is **not** resolvable there, and imports the host bundle from that
+stage. Every other gate greps or runs the artefacts *in place*, where a full
+`node_modules` hides a missing runtime dependency — which is how a plugin can pass
+every test locally and still die on the next machine with
+`Cannot find module 'asn1'`.
+
+If you copy this directory between machines, watch for flattened symlinks: a plain
+file copy turns pnpm's links under `node_modules/` into real directories, so the
+top-level `ssh2` can no longer see its own `asn1` / `bcrypt-pbkdf` siblings. The
+built `dist/` does not care (ssh2 is inside it), but `tsc` and
+`test/terminal-regression.mjs` do; `pnpm install --force` restores the links.
 
 `test/terminal-regression.mjs` boots the real `dist/index.mjs` against a
 self-hosted fake StoneOS over real `ssh2`, including a fake pager that stops at
