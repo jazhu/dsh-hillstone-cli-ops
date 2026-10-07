@@ -82,7 +82,12 @@ const checks = [
   // looks healthy while every hillstone_* tool is invisible to the agent.
   ['host    tools carry an output block', /output: toolOutput|output\(\)/, host],
   ['host    tool output renders text blocks', /type: "text", text/, host],
-  ['host    tool parameters use the flat property table', /required: true, description/, host],
+  // `ToolDefinition.parameters` is the wire JSON Schema: `ctx.tools.register()`
+  // never compiles the author DSL (flat property table + per-property
+  // `required: true`) — only `defineTool()` does, and this plugin registers raw
+  // defs. A flat table reaches the provider without a `type`, and the provider
+  // rejects the whole request with `got 'type: null'`.
+  ['host    tool parameters are raw JSON Schema objects', /parameters: \{\s*type: "object"/, host],
   // The `since` cursor counts bytes, and outputLog is re-sliced by the 512KB
   // cap — a string offset would silently shift under a polling agent.
   ['host    output byte cursor', /outputBytes/, host],
@@ -374,6 +379,9 @@ for (const [name, hit] of [
   // under a diagnosis that turned out to be wrong, and a maximized window hides
   // the size problem behind an OS-level setting the plugin does not control.
   ['host    the WebUI window is force-maximized (m10068)', /--start-maximized/.test(host)],
+  // And the author DSL must not come back in any tool's parameters: `register()`
+  // ships whatever object it is given straight to the model provider.
+  ['host    tool parameters carry no author DSL', /required: true/.test(host)],
 ]) {
   console.log(`${hit ? '  MISS' : '  ok  '} ${name}`)
   if (hit) bad++

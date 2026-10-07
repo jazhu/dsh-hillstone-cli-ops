@@ -1836,21 +1836,27 @@ function activate(ctx: ContextLike, config?: Partial<Config>): void {
                 '命令与回显在界面上实时可见；没有打开会话时自动改用独立 SSH 通道。' +
                 '注意该设备 CLI 没有 echo 命令，也不能返回 exit code，请使用该设备真实支持的命令语法。',
               parameters: {
-                deviceId: { type: 'string', required: true, description: '目标设备 id' },
-                commands: {
-                  type: 'array',
-                  items: { type: 'string' },
-                  required: true,
-                  description: '依次执行的 CLI 命令',
+                type: 'object',
+                properties: {
+                  deviceId: { type: 'string', description: '目标设备 id' },
+                  commands: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: '依次执行的 CLI 命令',
+                  },
+                  task: { type: 'string', description: '运维分析目标（自然语言）' },
+                  timeoutMs: {
+                    type: 'integer',
+                    description: '每条命令超时，毫秒（范围 5000 ~ 300000）',
+                  },
+                  preferSession: {
+                    type: 'boolean',
+                    description:
+                      '默认 true：优先在运维人员已打开的终端会话里执行，命令与回显会在界面上滚动可见。' +
+                      '传 false 则使用独立 SSH 通道，不打扰界面。',
+                  },
                 },
-                task: { type: 'string', required: true, description: '运维分析目标（自然语言）' },
-                timeoutMs: { type: 'integer', description: '每条命令超时，毫秒', minimum: 5000, maximum: 300000 },
-                preferSession: {
-                  type: 'boolean',
-                  description:
-                    '默认 true：优先在运维人员已打开的终端会话里执行，命令与回显会在界面上滚动可见。' +
-                    '传 false 则使用独立 SSH 通道，不打扰界面。',
-                },
+                required: ['deviceId', 'commands', 'task'],
               },
               output: toolOutput((v: any) => {
                 const lines: string[] = [
@@ -1921,9 +1927,13 @@ function activate(ctx: ContextLike, config?: Partial<Config>): void {
                 '要等命令结束就用 hillstone_send_input 配合 hillstone_get_output 轮询；' +
                 '用完请调用 hillstone_close_terminal 释放连接，否则 SSH 会话会一直留着。',
               parameters: {
-                deviceId: { type: 'string', required: true, description: '目标设备 id' },
-                cols: { type: 'integer', description: '终端列数，默认 120', minimum: 20, maximum: 500 },
-                rows: { type: 'integer', description: '终端行数，默认 40', minimum: 10, maximum: 300 },
+                type: 'object',
+                properties: {
+                  deviceId: { type: 'string', description: '目标设备 id' },
+                  cols: { type: 'integer', description: '终端列数，默认 120（范围 20 ~ 500）' },
+                  rows: { type: 'integer', description: '终端行数，默认 40（范围 10 ~ 300）' },
+                },
+                required: ['deviceId'],
               },
               output: toolOutput((v: any) => {
                 return (
@@ -1971,12 +1981,19 @@ function activate(ctx: ContextLike, config?: Partial<Config>): void {
                 '需要强制提交或明确不提交时传 submit:true / submit:false。' +
                 '典型用法：send_input 发命令 → get_output 带 since 轮询 → prompt 字段非空即执行完毕。',
               parameters: {
-                connId: { type: 'string', required: true, description: '目标会话 connId' },
-                data: { type: 'string', required: true, description: '要发送的原始输入，例如 "show cpu detail"、"q"、" "' },
-                submit: {
-                  type: 'boolean',
-                  description: '是否在末尾补 \\r 提交。默认：多字符命令自动提交，单字符按键与含控制字符的数据不提交。',
+                type: 'object',
+                properties: {
+                  connId: { type: 'string', description: '目标会话 connId' },
+                  data: {
+                    type: 'string',
+                    description: '要发送的原始输入，例如 "show cpu detail"、"q"、" "',
+                  },
+                  submit: {
+                    type: 'boolean',
+                    description: '是否在末尾补 \\r 提交。默认：多字符命令自动提交，单字符按键与含控制字符的数据不提交。',
+                  },
                 },
+                required: ['connId', 'data'],
               },
               output: toolOutput((v: any) => {
                 return (
@@ -2062,10 +2079,20 @@ function activate(ctx: ContextLike, config?: Partial<Config>): void {
                 'prompt 非空表示设备已经回到提示符（命令执行完毕），agentActive 表示该会话正被 agent 占用。' +
                 '典型用法：send_input 发命令后反复带 since 调用本工具，直到 prompt 非空。',
               parameters: {
-                connId: { type: 'string', required: true, description: '目标会话 connId' },
-                since: { type: 'integer', description: '游标，只返回该字节位置之后的新增输出', minimum: 0 },
-                tail: { type: 'integer', description: '最多返回的字符数，默认 8000', minimum: 200, maximum: 200000 },
-                raw: { type: 'boolean', description: 'true 时返回未清洗的原始 pty 文本' },
+                type: 'object',
+                properties: {
+                  connId: { type: 'string', description: '目标会话 connId' },
+                  since: {
+                    type: 'integer',
+                    description: '游标（>= 0），只返回该字节位置之后的新增输出',
+                  },
+                  tail: {
+                    type: 'integer',
+                    description: '最多返回的字符数，默认 8000（范围 200 ~ 200000）',
+                  },
+                  raw: { type: 'boolean', description: 'true 时返回未清洗的原始 pty 文本' },
+                },
+                required: ['connId'],
               },
               output: toolOutput((v: any) => {
                 const head: string[] = [`会话 ${v.connId}（${v.deviceName ?? v.status}）`]
@@ -2162,8 +2189,11 @@ function activate(ctx: ContextLike, config?: Partial<Config>): void {
                 '返回 { ok, closed }，closed 是被关闭的 connId 列表。' +
                 '注意：会话里有正在执行的命令时关闭会中断它，确认没有需要等待的命令再调用。',
               parameters: {
-                connId: { type: 'string', description: '要关闭的会话 connId' },
-                deviceId: { type: 'string', description: '关闭该设备上所有会话时使用' },
+                type: 'object',
+                properties: {
+                  connId: { type: 'string', description: '要关闭的会话 connId' },
+                  deviceId: { type: 'string', description: '关闭该设备上所有会话时使用' },
+                },
               },
               output: toolOutput((v: any) => {
                 return `已关闭 ${v.closed?.length ?? 0} 个终端会话：\n${(v.closed ?? []).join('\n')}`
@@ -2201,7 +2231,7 @@ function activate(ctx: ContextLike, config?: Partial<Config>): void {
                 '列出当前打开的终端会话，返回 connId / deviceId / deviceName / status / 是否被 agent 占用。' +
                 '用 hillstone_open_terminal 新建，或用这里的 connId 配合 hillstone_send_input。' +
                 '用 hillstone_get_output 取输出、用 hillstone_close_terminal 释放不再需要的会话。',
-              parameters: {},
+              parameters: { type: 'object', properties: {} },
               output: toolOutput((v: any) => {
                 const rows = v.sessions ?? []
                 if (!rows.length) return '当前没有打开的终端会话。'
@@ -2239,7 +2269,7 @@ function activate(ctx: ContextLike, config?: Partial<Config>): void {
               description:
                 '列出已管理的 Hillstone 设备（**不含密码**），返回 id / 名称 / IP / 账号 / SSH 端口 / 设备类型。' +
                 '所有需要 deviceId 的工具都先用本工具查询；不确定该用哪台设备时也先看这里。',
-              parameters: {},
+              parameters: { type: 'object', properties: {} },
               output: toolOutput((v: any) => {
                 const rows = v.devices ?? []
                 if (!rows.length) {
@@ -2278,7 +2308,10 @@ function activate(ctx: ContextLike, config?: Partial<Config>): void {
                 '返回每台设备的 deviceId / ip / port / state（online=端口可达、offline=不可达）/ 可选 ms（握手耗时）与 error（失败原因）。' +
                 '注意：online 只代表「设备开机且 SSH 端口可达」，不代表已登录，也不代表账号密码有效。',
               parameters: {
-                deviceId: { type: 'string', description: '目标设备 id；不给则探测全部已管理设备' },
+                type: 'object',
+                properties: {
+                  deviceId: { type: 'string', description: '目标设备 id；不给则探测全部已管理设备' },
+                },
               },
               output: toolOutput((v: any) => {
                 const rows = v.results ?? []
@@ -2315,7 +2348,11 @@ function activate(ctx: ContextLike, config?: Partial<Config>): void {
                 'error=页面打不开或浏览器无法启动。密码只在宿主侧解密并填入页面，不会回传。' +
                 '注意：登录失败不要重试，StoneOS 会在失败后要求图形验证码，重复自动尝试即使密码正确也会失败。',
               parameters: {
-                deviceId: { type: 'string', required: true, description: '目标设备 id' },
+                type: 'object',
+                properties: {
+                  deviceId: { type: 'string', description: '目标设备 id' },
+                },
+                required: ['deviceId'],
               },
               output: toolOutput((v: any) => {
                 const statusMap: Record<string, string> = {

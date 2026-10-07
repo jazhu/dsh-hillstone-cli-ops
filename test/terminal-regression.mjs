@@ -543,7 +543,36 @@ check(
     return Array.isArray(blocks) && blocks[0]?.text?.includes('device not found')
   }),
 )
-check('no tool definition declares a non-array prompt-wrapped parameters', [...registered.values()].every((t) => t.parameters.type !== 'object' || t.parameters.properties === undefined))
+// `ToolDefinition.parameters` is the wire JSON Schema: `ctx.tools.register()`
+// never compiles the author DSL (flat property table + per-property
+// `required: true`) — only `defineTool()` does. A flat table reaches the model
+// provider without a root `type`, and the provider rejects the entire request
+// with `Invalid schema for function ...: got 'type: null'`. Assert the wire shape
+// here, where the registered defs are actually in hand.
+check(
+  'every tool declares an object-rooted JSON Schema for its parameters',
+  [...registered.values()].every(
+    (t) =>
+      t.parameters.type === 'object' &&
+      !!t.parameters.properties &&
+      typeof t.parameters.properties === 'object' &&
+      !Array.isArray(t.parameters.properties) &&
+      (t.parameters.required === undefined ||
+        (Array.isArray(t.parameters.required) &&
+          t.parameters.required.every((k) => typeof k === 'string' && Object.hasOwn(t.parameters.properties, k)))),
+  ),
+  [...registered.values()]
+    .map((t) => `${t.name}:${String(t.parameters.type)}/${Object.keys(t.parameters.properties ?? {}).join('+')}`)
+    .join(' '),
+)
+check(
+  'no tool parameters carry the author DSL or out-of-subset keywords',
+  [...registered.values()].every((t) => {
+    const wire = JSON.stringify(t.parameters)
+    return !/"required":true/.test(wire) && !/"(minimum|maximum)"/.test(wire)
+  }),
+  [...registered.values()].map((t) => `${t.name}:${JSON.stringify(t.parameters).slice(0, 60)}`).join(' | '),
+)
 check('every tool has an execute function', [...registered.values()].every((t) => typeof t.execute === 'function'))
 // The device CLI has no `echo` and returns no exit code; a tool description that
 // omits that sends the agent into commands that silently do nothing.
