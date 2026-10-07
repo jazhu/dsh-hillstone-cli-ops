@@ -314,8 +314,22 @@ for (const [name, hit] of [
   // declarations, not the bare word: the comments deliberately still say
   // "duplicate" when explaining that history, and a blanket /duplicate/ would
   // fire on them and make this check useless.
-  ['client  复制 no longer POSTs on click (m04031)', /const duplicate = async|void duplicate\(/.test(clientSrc)],
+  //
+  // m10187 widened the first of these to cover the CURRENT spelling too. It had
+  // been guarding only `duplicate`, so after the rename to openCopy it could no
+  // longer notice the very regression it is named after — an async openCopy is
+  // precisely "POSTs the moment the button is pressed". The old spellings are
+  // kept as a cheap second layer: bringing that name back is still a regression.
+  ['client  复制 no longer POSTs on click (m04031)', /const openCopy = async|void openCopy\(|const duplicate = async|void duplicate\(/.test(clientSrc)],
+  // Stated for what it actually is: the old symbol must not reappear. The
+  // bundle legitimately contains `openCopy(d)` (the 复制 onClick), so this cannot
+  // be widened the way the line above was.
   ['client  bundle has no duplicate() call site (m04031)', /void duplicate\(|duplicate\(d\)/.test(client)],
+  // Side effect worth knowing: because the line above names its symbols
+  // literally, renaming the handler a THIRD time also trips it (verified by
+  // negctl-m04031-copy.mjs mutation 3). That is deliberate -- a rename is exactly
+  // the event that made this check deaf once -- but it means a future rename
+  // must touch this line too, and the failure will say so.
   // m05847 — both ways in sit on the name row, right-aligned.
   ['client  the logins row exists and is right-aligned (m05847)', !/ops-dev-logins \{[^}]*margin-left: auto/.test(panelCss)],
   ['client  the login buttons are a styled group (m05847)', !/ops-btn\.login \{/.test(panelCss)],

@@ -45,7 +45,8 @@
     "test": "node test/terminal-regression.mjs && node test/bundle-gate.mjs && node test/locale-gate.mjs",
     "test:locale:negctl": "node test/negctl-locale.mjs",
     "test:modal:negctl": "node test/negctl-modal-placement.mjs",
-    "test:webui:negctl": "node test/negctl-web-login-viewport.mjs"
+    "test:webui:negctl": "node test/negctl-web-login-viewport.mjs",
+    "test:copy:negctl": "node test/negctl-m04031-copy.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
