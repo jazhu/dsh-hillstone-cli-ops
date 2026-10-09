@@ -8,7 +8,11 @@ can do all of that itself.
 
 The plugin is a two-half DSH plugin: a Node host half (SSH, encryption, session
 logs, the agent tools) and a browser client half (the sidebar tab and an xterm.js
-terminal). Both are built from one `src/` tree.
+terminal). Both are built from one `src/` tree into `dist/`, which is committed —
+so the package installs with no build step and no runtime `node_modules`: the
+`ssh2` closure (asn1, bcrypt-pbkdf, tweetnacl, safer-buffer) and `xterm` are
+inlined into the bundle. `playwright` is an optional dependency used only by the
+WebUI-login button.
 
 [中文说明](README.zh-CN.md)
 

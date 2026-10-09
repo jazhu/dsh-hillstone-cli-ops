@@ -7,7 +7,10 @@
 [English README](README.md)
 
 本插件由两半组成：Node 宿主半边（SSH、加密、会话日志、agent 工具）和浏览器客户端半边
-（右侧栏标签页 + xterm.js 终端）。两半都由同一份 `src/` 源码构建。
+（右侧栏标签页 + xterm.js 终端）。两半都由同一份 `src/` 源码构建进 `dist/`，而 `dist/`
+已入库——所以插件安装时**免构建**、运行时也**不需要 node_modules**：`ssh2` 闭包
+（asn1、bcrypt-pbkdf、tweetnacl、safer-buffer）与 `xterm` 已内联进产物。`playwright`
+只是可选依赖，仅 WebUI 登录按钮用到。
 
 ---
 

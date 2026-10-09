@@ -1,7 +1,7 @@
 {
   "name": "dsh-hillstone-cli-ops",
   "displayName": "Hillstone 设备运维",
-  "description": "设备运维终端插件：右侧栏「设备运维」标签页，管理 Hillstone / StoneOS 设备（增删改查 + 搜索分页 + 端口存活探测 + SSH 终端 + 连接审计日志），提供「执行策略」让用户自建命令限制规则（时间窗口 + 命令模式，命中即在 agent 执行入口拒绝），并向 agent 提供 9 个 hillstone_* 运维工具。连接成功后自动切到终端页，agent 触发的连接会展开到发起它的那个会话。",
+  "description": "Hillstone / StoneOS 设备运维插件：右侧栏「设备运维」标签页（设备管理 + SSH 终端 + 连接审计 + 执行策略），并给 agent 注册 9 个 hillstone_* 运维工具。ssh2 与 xterm 已内联进 dist，运行时零 node_modules 依赖，安装免构建（git / npm / tarball 均无需 prepare 或 allowBuilds）。",
   "version": "1.0.0",
   "type": "module",
   "license": "MIT",

@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>dsh-hillstone-cli-ops — Hillstone / StoneOS 设备运维插件</title>
-<meta name="description" content="DSH 插件：把 Hillstone / StoneOS 网络设备搬进右侧栏——设备管理、SSH 终端、连接审计日志、执行策略，并给 agent 9 个运维工具。" />
+<meta name="description" content="DSH 插件：把 Hillstone / StoneOS 网络设备搬进右侧栏——设备管理、SSH 终端、连接审计日志、执行策略，并给 agent 9 个运维工具。ssh2 与 xterm 已内联进 dist，运行时零 node_modules，安装免构建。" />
 <style>
   /* Palette lifted from the plugin's own panelCss token fallbacks, so this page
      reads as the same product it describes. */
@@ -262,7 +262,7 @@
     <p class="tagline">
       把 Hillstone / StoneOS 网络设备搬进 DeepSeek Harness 的<b>右侧栏</b>：管理设备、打开真实的
       SSH 终端、查看每次连接的审计日志、用<b>执行策略</b>限定 agent 在你设定的时间窗口内不得执行
-      你指定的命令——同时给助手注册 <b>9 个</b>运维工具，让它自己就能做这些事。
+      你指定的命令——同时给助手注册 <b>9 个</b>运维工具，让它自己就能做这些事。依赖已全部内联：<b>ssh2</b> 与 <b>xterm</b> 打进 dist，运行时零 node_modules；<b>playwright</b> 仅 WebUI 登录按钮用到，缺失也不影响其它功能。
     </p>
     <div class="cta">
       <a class="btn primary" href="https://github.com/jazhu/dsh-hillstone-cli-ops" target="_blank" rel="noopener">GitHub 仓库</a>
@@ -274,7 +274,7 @@
       <span>版本 <code>1.0.0</code></span>
       <span>Node <code>22+</code></span>
       <span>许可 <code>MIT</code></span>
-      <span>依赖 <code>ssh2</code> · <code>xterm</code> · <code>playwright</code></span>
+      <span>运行时零依赖 · <code>ssh2</code>/<code>xterm</code> 已内联 · <code>playwright</code> 可选</span>
     </div>
   </div>
 </header>
@@ -610,13 +610,12 @@
   <!-- ============ 安装 ============ -->
   <section>
     <h2>安装</h2>
-    <pre class="code"><span class="c"># 1. 克隆并构建</span>
+    <pre class="code"><span class="c"># 1. 克隆（dist/ 已随仓库提交，无需构建）</span>
 git clone https://github.com/jazhu/dsh-hillstone-cli-ops
 cd dsh-hillstone-cli-ops
-pnpm install
-pnpm run build          <span class="c"># 重新生成 dist/（不入库）</span>
+pnpm install            <span class="c"># 仅装 devDependencies；运行时零 node_modules</span>
 
-<span class="c"># 2. 装进你的 DSH profile</span>
+<span class="c"># 2. 装进你的 DSH profile（git / npm / tarball 均免构建、无需 allowBuilds）</span>
 pnpm pack &amp;&amp; &lt;你的 dsh 插件安装命令&gt; ./dsh-hillstone-cli-ops-1.0.0.tgz</pre>
 
     <div class="note warn">
@@ -628,7 +627,7 @@ pnpm pack &amp;&amp; &lt;你的 dsh 插件安装命令&gt; ./dsh-hillstone-cli-o
     <p style="font-size:14px;color:var(--label-tert)">
       Node 22+；一个暴露了 <code>tools</code>、<code>slots</code>、
       <code>sidebarRightTabs</code>、<code>sidebarRight</code>、<code>uiWorkspace</code>
-      这些服务的 DSH 版本；以及 <code>ssh2</code> / <code>xterm</code>（由 <code>pnpm install</code> 装好）。
+      这些服务的 DSH 版本。运行时<b>无需</b> ssh2 / xterm（已内联进 dist/）；<code>playwright</code> 为可选依赖，仅 WebUI 登录按钮用到。
     </p>
   </section>
 
