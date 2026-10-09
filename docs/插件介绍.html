@@ -281,6 +281,87 @@
 
 <main class="wrap">
 
+  <!-- ============ 它解决什么问题 ============ -->
+  <section>
+    <h2>它解决什么问题</h2>
+    <p class="lead">
+      网络设备的日常运维长期卡在「人肉 SSH」上：命令要一个字一个字敲，操作没有留痕，
+      agent 想帮你干活却进不去设备、也看不到历史。这个插件把 Hillstone / StoneOS 设备
+      接进 DSH，让助手能以你的身份、在你的规则之下，真正在设备上做运维。
+    </p>
+    <div class="grid">
+      <div class="card">
+        <h4><span class="ico e"></span>没有它</h4>
+        <p>agent 连不上设备，运维只能你手动 SSH；命令无审计、无可复用；配置变更靠记忆；
+           故障来了要逐个登设备翻日志。</p>
+      </div>
+      <div class="card">
+        <h4><span class="ico g"></span>有了它</h4>
+        <p>agent 通过 ssh2 直接操作设备，做日志查询分析、配置下发、设备巡检、故障排除；
+           每次连接都有审计留痕；你用「执行策略」圈定 agent 不能碰的命令与时间窗。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 可以做什么 ============ -->
+  <section>
+    <h2>可以做什么</h2>
+    <p class="lead">插件把设备运维拆成四件 agent 能独立上手的事，外加一块给你自己用的界面。</p>
+    <div class="grid">
+      <div class="card">
+        <h4><span class="ico"></span>日志查询分析</h4>
+        <p>让 agent 登设备抓 running-config、会话表、日志缓冲，汇总体征、定位异常，结论回到对话里。</p>
+      </div>
+      <div class="card">
+        <h4><span class="ico"></span>配置下发</h4>
+        <p>agent 走 SSH 把变更命令写到设备；「执行策略」卡住危险命令，任何流量发出前先拦。</p>
+      </div>
+      <div class="card">
+        <h4><span class="ico"></span>设备巡检</h4>
+        <p>批量连设备跑一组只读命令，host LLM 汇总健康度，端口存活、版本、策略一眼看全。</p>
+      </div>
+      <div class="card">
+        <h4><span class="ico"></span>故障排除</h4>
+        <p>实时终端 + 连接审计，agent 和你都能回看「谁、什么时候、敲了什么」，快速定位根因。</p>
+      </div>
+    </div>
+    <h3>给你自己的界面</h3>
+    <p>右侧栏「设备运维」标签页：<span class="tabname">设备管理</span> 增删改查与存活检测、
+       <span class="tabname">终端</span> 实时 xterm.js 会话、<span class="tabname">日志</span> 连接审计、
+       <span class="tabname">执行策略</span> 你写的命令限制规则。9 个 <code>hillstone_*</code> 工具让助手不必等你也能操作。</p>
+  </section>
+
+  <!-- ============ 亮点 ============ -->
+  <section>
+    <h2>亮点</h2>
+    <div class="grid">
+      <div class="card">
+        <h4><span class="ico g"></span>agent 真能上设备</h4>
+        <p>不是「建议命令」，而是 ssh2 建立的真实 pty 会话，agent 直接执行、实时看到回显。</p>
+      </div>
+      <div class="card">
+        <h4><span class="ico"></span>操作全程留痕</h4>
+        <p>每条连接逐键 / 整行记录来源（运维员 / agent / 系统），事后可查、可追责。</p>
+      </div>
+      <div class="card">
+        <h4><span class="ico n"></span>策略前置拦截</h4>
+        <p>「执行策略」在时间窗 + 命令模式命中时，于任何 SSH 流量前拒绝，并记录原因。</p>
+      </div>
+      <div class="card">
+        <h4><span class="ico"></span>免构建即装即用</h4>
+        <p>ssh2 与 xterm 已内联进 dist/，git / npm / tarball 安装零 node_modules、无需 prepare。</p>
+      </div>
+      <div class="card">
+        <h4><span class="ico"></span>会话归属清晰</h4>
+        <p>agent 触发的连接展开到发起它的那个会话，不会乱弹到你在看的另一段对话。</p>
+      </div>
+      <div class="card">
+        <h4><span class="ico g"></span>密码只留宿主</h4>
+        <p>凭据由宿主解密使用，从不下发前端、不进返回值；WebUI 登录失败不暴力重试。</p>
+      </div>
+    </div>
+  </section>
+
   <!-- ============ 面板 ============ -->
   <section>
     <h2>面板</h2>
