@@ -45,7 +45,6 @@
   },
   "scripts": {
     "build": "node build.mjs",
-    "prepare": "node build.mjs",
     "test": "node test/terminal-regression.mjs && node test/bundle-gate.mjs && node test/locale-gate.mjs && node test/portability-gate.mjs",
     "test:locale:negctl": "node test/negctl-locale.mjs",
     "test:modal:negctl": "node test/negctl-modal-placement.mjs",

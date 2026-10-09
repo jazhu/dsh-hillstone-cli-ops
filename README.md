@@ -98,31 +98,22 @@ prebuilt and ready to load:
 pnpm pack && <your-dsh-plugin-install-command> ./dsh-hillstone-cli-ops-1.0.0.tgz
 ```
 
-### From git — the package builds itself once you allow it
+### From git — no build step
 
-`dist/` is a build artifact and is not committed, so the package declares
-`"prepare": "node build.mjs"` and builds itself during install. pnpm ≥ 10 refuses
-to run a git dependency's lifecycle scripts until you allow that package, so the
-first `dsh plugin add github:jazhu/dsh-hillstone-cli-ops#<sha>` stops and prints
-the key to allowlist. Add it to your profile's `pnpm-workspace.yaml` and install
-again:
-
-```yaml
-allowBuilds:
-  dsh-hillstone-cli-ops: true
-```
-
-Pin the commit: that flag lets the package execute code on your machine at
-install time, outside the agent sandbox. A tarball or npm install needs no such
-permission, because it ships the built output.
+`dist/` is committed, so the git tarball already contains the built host half
+(`dist/index.mjs`) and client half (`dist/client.js`). There is no `prepare`
+script, so `dsh plugin add github:jazhu/dsh-hillstone-cli-ops#<sha>` installs
+with no build and no `allowBuilds` entry — pnpm ≥ 10 would otherwise refuse to
+run a git dependency's lifecycle scripts.
 
 ### From a checkout (development)
 
 ```bash
 git clone https://github.com/jazhu/dsh-hillstone-cli-ops
 cd dsh-hillstone-cli-ops
-pnpm install          # `prepare` builds dist/
+pnpm install          # installs devDependencies only; dist/ is already committed
 pnpm test
+# pnpm run build       # optional: regenerate dist/ from src/
 ```
 
 **Restart the DSH main process afterwards.** Disabling and re-enabling a plugin

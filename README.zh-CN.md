@@ -80,28 +80,20 @@ https://<设备 IP>:<Web 端口，未填则 443>/
 pnpm pack && <你的 dsh 插件安装命令> ./dsh-hillstone-cli-ops-1.0.0.tgz
 ```
 
-### 用 git 安装——放行一次，包会自己构建
+### 用 git 安装——无需构建
 
-`dist/` 是构建产物、不入库，所以包里声明了 `"prepare": "node build.mjs"`，安装时由它自己构建。
-pnpm ≥ 10 默认拒绝执行 git 依赖的生命周期脚本，除非你放行这个包，所以第一次
-`dsh plugin add github:jazhu/dsh-hillstone-cli-ops#<sha>` 会停下来并打印需要放行的包名。把它写进
-你 profile 的 `pnpm-workspace.yaml` 后再装一次：
-
-```yaml
-allowBuilds:
-  dsh-hillstone-cli-ops: true
-```
-
-请锁定 commit：这个开关意味着「允许该包在安装时于你的机器上执行代码」，且运行在 agent 沙箱之外。
-用 tarball 或 npm 安装不需要任何放行，因为它分发的是构建好的产物。
+`dist/` 已经入库，所以 git tarball 自带构建好的宿主端（`dist/index.mjs`）和客户端（`dist/client.js`）。
+包里没有 `prepare` 脚本，因此 `dsh plugin add github:jazhu/dsh-hillstone-cli-ops#<sha>` 安装时**不构建、
+也不需要 `allowBuilds`**——否则 pnpm ≥ 10 会拒绝执行 git 依赖的生命周期脚本。
 
 ### 用源码 checkout（开发）
 
 ```bash
 git clone https://github.com/jazhu/dsh-hillstone-cli-ops
 cd dsh-hillstone-cli-ops
-pnpm install          # `prepare` 会构建 dist/
+pnpm install          # 只装 devDependencies；dist/ 已入库
 pnpm test
+# pnpm run build       # 可选：从 src/ 重新生成 dist/
 ```
 
 **装完请重启 DSH 主进程。** 停用再启用插件不会重建运行中进程的宿主 fiber，所以新的宿主代码

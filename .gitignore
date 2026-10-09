@@ -3,9 +3,11 @@
 node_modules/
 
 # Build output. `pnpm run build` regenerates dist/index.mjs + dist/client.js
-# (and the .map files). Not committed: it is reproducible from src/ and weighs
-# ~1.9 MB, most of it the inlined xterm bundle.
-dist/
+# (and the .map files). dist/ IS committed so the published package needs no
+# build step at install time: pnpm >= 10 blocks a git dependency's prepare
+# script unless the package is on the profile's allowBuilds allowlist, and the
+# inlined ssh2/xterm mean dist/ loads with no node_modules at all.
+dist/*.map
 
 # Local build / probe logs
 *.log
