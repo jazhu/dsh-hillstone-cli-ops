@@ -280,9 +280,16 @@ await Promise.all(
 )
 await new Promise((r) => setTimeout(r, 1500))
 const arrival = ptyReceived.join('')
+// The connect-time init line (`terminal length 0\r`, v1.0.2) goes through the
+// same ordered write chain and lands FIRST — before any operator keystroke —
+// which is exactly the ordering guarantee this test asserts. Strip it so the
+// comparison measures the submitted keystrokes only.
+const INIT_LINE = 'terminal length 0\r'
+const initHead = arrival.startsWith(INIT_LINE) ? INIT_LINE : ''
+const keystrokes = arrival.slice(initHead.length)
 check(
   'concurrent input arrives whole, in submission order, never interleaved',
-  arrival === submitted.join(''),
+  initHead === INIT_LINE && keystrokes === submitted.join(''),
   `arrivals=${arrival.length} want=${submitted.join('').length}; head=${JSON.stringify(arrival.slice(0, 24))}`,
 )
 // The device echoes each printable byte, so the shell buffer is now huge;

@@ -434,11 +434,10 @@ const PROMPT_RE = /(?:#|\$|>)\s*$/
  * swallows any command typed at that point — it just flushes the rest and
  * returns to the prompt, so the command never runs.
  *
- * There is deliberately no `terminal length 0` on connect: the SG-6000 rejects
- * it with `^-----unrecognized keyword` and paginates anyway. Paging has to be
- * answered where it happens, so the agent must be able to page itself. Without
- * this, any command longer than a page hangs until the timeout and returns a
- * truncated result.
+ * Since v1.0.2 a `terminal length 0` init line is sent once the device's first
+ * prompt appears (devices that reject it just answer `^-----unrecognized
+ * keyword` and keep paging). The pager handling below stays as the fallback:
+ * it is what saves a command on a device where the init line did not take.
  *
  * The trailing NUL matters: the marker is ` --More-- \0`, so match on it
  * rather than on a bare `--More--` substring that could appear in real output.
@@ -447,6 +446,10 @@ const PAGER_RE = /--More--[ \t]*[\u0000]?\s*$/
 
 /** Ceiling on automatic paging, so a stuck pager cannot spin forever. */
 const PAGER_MAX_PAGES = 400
+
+/** How long to wait for the device's first CLI prompt before giving up on
+ *  sending the connect-time init line (`terminal length 0`). */
+const INIT_COMMAND_TIMEOUT_MS = 10_000
 
 
 /** connIds of sessions the agent is currently driving, for UI indication. */
@@ -629,17 +632,36 @@ function connectDevice(
           session.log.event('会话被设备关闭')
           broadcast(session, 'status', { status: 'closed' })
         })
-        // Send `terminal length 0` once the shell is up, so long output comes
-        // back in one stream instead of stopping at `--More--`. On devices
-        // that do not accept it the line is answered with
-        // `^-----unrecognized keyword` and paging continues — harmless, and
-        // the `--More--` answer in runCommandInSession / the UI stays as the
-        // fallback. The write goes through the same ordered chain as every
-        // other keystroke, so it can never interleave with the operator.
-        enqueueWrite(session, 'terminal length 0\r').catch(() => {
-          /* shell closed before the init line was written — nothing to recover */
+        // Send `terminal length 0` — but only after the device's first CLI
+        // prompt comes back. StoneOS spends a moment after the pty opens
+        // printing its banner/motd, and the line editor does not accept input
+        // yet: an init line written immediately is swallowed by the CLI and
+        // never executes. So watch the stream with the same prompt heuristic
+        // the agent path uses (PROMPT_RE on the last line) and inject on the
+        // first prompt. A 10 s guard gives up silently when no prompt ever
+        // appears — the --More-- answer in runCommandInSession / the UI stays
+        // as the paging fallback either way. The write goes through the same
+        // ordered chain as every other keystroke, so it can never interleave
+        // with the operator.
+        let initSent = false
+        let initTail = ''
+        const initTimer = setTimeout(() => {
+          if (!initSent) session.log.event('未等到设备提示符，跳过 terminal length 0 下发')
+        }, INIT_COMMAND_TIMEOUT_MS)
+        const sendInit = (): void => {
+          if (initSent || session.status !== 'ready' || !session.shell) return
+          initSent = true
+          clearTimeout(initTimer)
+          enqueueWrite(session, 'terminal length 0\r').catch(() => {
+            /* shell closed before the init line was written — nothing to recover */
+          })
+          session.log.event('已下发初始化命令 terminal length 0')
+        }
+        shell.on('data', (chunk: Buffer) => {
+          if (initSent) return
+          initTail = (initTail + chunk.toString('utf-8')).slice(-2000)
+          if (promptReturned(initTail)) sendInit()
         })
-        session.log.event('已下发初始化命令 terminal length 0')
         resolve({
           connId,
           deviceId,
