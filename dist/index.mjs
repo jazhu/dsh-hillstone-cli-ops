@@ -20161,15 +20161,14 @@ var import_ssh2 = __toESM(require_lib2(), 1);
 import { randomUUID, randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
 import { createServer } from "node:http";
 import {
-  mkdirSync as mkdirSync3,
-  readFileSync as readFileSync2,
+  mkdirSync as mkdirSync4,
+  readFileSync as readFileSync3,
   writeFileSync,
-  renameSync,
-  existsSync as existsSync2,
+  existsSync as existsSync3,
   appendFileSync as appendFileSync2
 } from "node:fs";
 import { homedir } from "node:os";
-import { join as join3 } from "node:path";
+import { join as join4 } from "node:path";
 import net from "node:net";
 
 // src/types.ts
@@ -20185,9 +20184,157 @@ function normalizeDeviceType(value) {
   return typeof value === "string" && DEVICE_TYPES.includes(value) ? value : "other";
 }
 
-// src/web-login.ts
-import { mkdirSync } from "node:fs";
+// src/store-db.ts
+import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
+var SCHEMA = `
+CREATE TABLE IF NOT EXISTS devices (
+  id         TEXT PRIMARY KEY,
+  name       TEXT NOT NULL,
+  ip         TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  json       TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_devices_name ON devices(name);
+CREATE TABLE IF NOT EXISTS policies (
+  id         TEXT PRIMARY KEY,
+  name       TEXT NOT NULL,
+  enabled    INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  json       TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_policies_name ON policies(name);
+`;
+var OpsDb = class {
+  db;
+  dbPath;
+  log;
+  constructor(dataDir, log = {}) {
+    this.dbPath = join(dataDir, "ops.db");
+    this.log = log;
+    try {
+      mkdirSync(dataDir, { recursive: true });
+      this.db = new DatabaseSync(this.dbPath);
+      this.db.exec(SCHEMA);
+      this.db.exec("PRAGMA journal_mode = WAL;");
+    } catch (e) {
+      this.log.warn?.(`[dsh-hillstone-cli-ops] SQLite \u521D\u59CB\u5316\u5931\u8D25\uFF0C\u6570\u636E\u4EC5\u4FDD\u5B58\u5728\u5185\u5B58\uFF1A${e.message}`);
+      this.db = void 0;
+    }
+  }
+  get usable() {
+    return this.db !== void 0;
+  }
+  rows(table) {
+    if (!this.db) return [];
+    try {
+      return this.db.prepare(`SELECT id, json FROM ${table}`).all();
+    } catch {
+      return [];
+    }
+  }
+  /** Whole-table replace; the maps are small (tens of rows) and this is rare. */
+  putDevices(items) {
+    if (!this.db) return;
+    try {
+      this.db.exec("BEGIN");
+      this.db.prepare("DELETE FROM devices").run();
+      const ins = this.db.prepare(
+        "INSERT INTO devices (id, name, ip, updated_at, json) VALUES (?, ?, ?, ?, ?)"
+      );
+      for (const it of items) ins.run(it.id, it.name, it.ip, Date.parse(it.updatedAt) || 0, it.json);
+      this.db.exec("COMMIT");
+    } catch (e) {
+      try {
+        this.db?.exec("ROLLBACK");
+      } catch {
+      }
+      this.log.warn?.(`[dsh-hillstone-cli-ops] \u8BBE\u5907\u5199\u5165 SQLite \u5931\u8D25\uFF08\u5185\u5B58\u6570\u636E\u4E0D\u53D7\u5F71\u54CD\uFF09\uFF1A${e.message}`);
+    }
+  }
+  putPolicies(items) {
+    if (!this.db) return;
+    try {
+      this.db.exec("BEGIN");
+      this.db.prepare("DELETE FROM policies").run();
+      const ins = this.db.prepare(
+        "INSERT INTO policies (id, name, enabled, updated_at, json) VALUES (?, ?, ?, ?, ?)"
+      );
+      for (const it of items) ins.run(it.id, it.name, it.enabled ? 1 : 0, Date.parse(it.updatedAt) || 0, it.json);
+      this.db.exec("COMMIT");
+    } catch (e) {
+      try {
+        this.db?.exec("ROLLBACK");
+      } catch {
+      }
+      this.log.warn?.(`[dsh-hillstone-cli-ops] \u7B56\u7565\u5199\u5165 SQLite \u5931\u8D25\uFF08\u5185\u5B58\u6570\u636E\u4E0D\u53D7\u5F71\u54CD\uFF09\uFF1A${e.message}`);
+    }
+  }
+  deviceRows() {
+    return this.rows("devices");
+  }
+  policyRows() {
+    return this.rows("policies");
+  }
+  isEmpty() {
+    return this.deviceRows().length === 0 && this.policyRows().length === 0;
+  }
+  dispose() {
+    try {
+      this.db?.close();
+    } catch {
+    }
+    this.db = void 0;
+  }
+};
+function migrateLegacyJson(db, dir, parse) {
+  const devFile = join(dir, "devices.json");
+  const polFile = join(dir, "policies.json");
+  if (!existsSync(devFile) && !existsSync(polFile)) return { devices: 0, policies: 0 };
+  const arr = (v) => Array.isArray(v) ? v : [];
+  let devices = [];
+  let policies = [];
+  try {
+    if (existsSync(devFile)) {
+      const parsed = parse(readFileSync(devFile, "utf-8"));
+      devices = arr(parsed?.devices ?? parsed);
+    }
+    if (existsSync(polFile)) {
+      const parsed = parse(readFileSync(polFile, "utf-8"));
+      policies = arr(parsed?.policies ?? parsed);
+    }
+  } catch {
+    return { devices: 0, policies: 0 };
+  }
+  const validDevices = devices.filter((d) => d && typeof d.id === "string" && d.id);
+  const validPolicies = policies.filter((p) => p && typeof p.id === "string" && p.id);
+  db.putDevices(validDevices.map((d) => ({
+    id: d.id,
+    name: String(d.name ?? ""),
+    ip: String(d.ip ?? ""),
+    updatedAt: d.updatedAt ?? "",
+    json: JSON.stringify(d)
+  })));
+  db.putPolicies(validPolicies.map((p) => ({
+    id: p.id,
+    name: String(p.name ?? ""),
+    enabled: p.enabled !== false,
+    updatedAt: p.updatedAt ?? "",
+    json: JSON.stringify(p)
+  })));
+  for (const f of [devFile, polFile]) {
+    try {
+      if (existsSync(f)) renameSync(f, f + ".imported");
+    } catch {
+    }
+  }
+  return { devices: validDevices.length, policies: validPolicies.length };
+}
+
+// src/web-login.ts
+import { mkdirSync as mkdirSync2 } from "node:fs";
+import { join as join2 } from "node:path";
 var DEFAULT_WEB_PORT = 443;
 var NAVIGATE_MS = 45e3;
 var NETWORK_IDLE_MS = 2e4;
@@ -20238,8 +20385,8 @@ async function openWindow(device, storeDir) {
       missing ? "\u7F3A\u5C11 playwright\uFF1AWebUI \u767B\u5F55\u9700\u8981\u5B83\uFF0C\u4F46\u63D2\u4EF6\u76EE\u5F55\u91CC\u6CA1\u6709\u5B89\u88C5\u3002\u8BF7\u5728\u8BE5\u63D2\u4EF6\u76EE\u5F55\u6267\u884C `pnpm add playwright && npx playwright install chromium`\u3002" : `\u52A0\u8F7D playwright \u5931\u8D25\uFF1A${raw.split("\n")[0]}`
     );
   }
-  const userDataDir = join(storeDir, PROFILE_DIR, device.id);
-  mkdirSync(userDataDir, { recursive: true });
+  const userDataDir = join2(storeDir, PROFILE_DIR, device.id);
+  mkdirSync2(userDataDir, { recursive: true });
   const url = webLoginUrl(device);
   let context;
   try {
@@ -20368,8 +20515,8 @@ async function webLoginForgetAll() {
 }
 
 // src/session-log.ts
-import { appendFileSync, existsSync, mkdirSync as mkdirSync2, readFileSync, readdirSync, rmSync } from "node:fs";
-import { join as join2 } from "node:path";
+import { appendFileSync, existsSync as existsSync2, mkdirSync as mkdirSync3, readFileSync as readFileSync2, readdirSync, rmSync } from "node:fs";
+import { join as join3 } from "node:path";
 var LOG_RETENTION_DAYS = 30;
 var MAX_ENTRIES = 2e4;
 var MAX_TEXT = 4096;
@@ -20384,12 +20531,12 @@ var SessionLogWriter = class {
     this.logDir = logDir;
     this.meta = meta;
     this.startedAt = (/* @__PURE__ */ new Date()).toISOString();
-    const dayDir = join2(logDir, dayKey(new Date(this.startedAt)));
+    const dayDir = join3(logDir, dayKey(new Date(this.startedAt)));
     try {
-      mkdirSync2(dayDir, { recursive: true });
+      mkdirSync3(dayDir, { recursive: true });
     } catch {
     }
-    this.file = join2(dayDir, `${meta.connId}.jsonl`);
+    this.file = join3(dayDir, `${meta.connId}.jsonl`);
     this.write({ t: "header", id: meta.connId, ...meta, startedAt: this.startedAt });
   }
   file;
@@ -20480,17 +20627,17 @@ var SessionLogWriter = class {
   }
 };
 function logRoot(dataDir) {
-  return join2(dataDir, "oplog");
+  return join3(dataDir, "oplog");
 }
 function pruneLogs(logDir, retentionDays = LOG_RETENTION_DAYS, now = /* @__PURE__ */ new Date()) {
-  if (!existsSync(logDir)) return 0;
+  if (!existsSync2(logDir)) return 0;
   const cutoffKey = dayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - retentionDays));
   let removed = 0;
   try {
     for (const name2 of readdirSync(logDir)) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(name2) || name2 >= cutoffKey) continue;
       try {
-        rmSync(join2(logDir, name2), { recursive: true, force: true });
+        rmSync(join3(logDir, name2), { recursive: true, force: true });
         removed++;
       } catch (e) {
         console.warn("[dsh-hillstone-cli-ops] cannot remove old log day", name2, ":", e.message);
@@ -20505,7 +20652,7 @@ function parseLogFile(file) {
   const out = { header: null, entries: [] };
   let raw;
   try {
-    raw = readFileSync(file, "utf-8");
+    raw = readFileSync2(file, "utf-8");
   } catch {
     return out;
   }
@@ -20525,7 +20672,7 @@ function parseLogFile(file) {
   return out;
 }
 function listSessionLogs(logDir, limit = 200) {
-  if (!existsSync(logDir)) return [];
+  if (!existsSync2(logDir)) return [];
   const out = [];
   let days;
   try {
@@ -20536,12 +20683,12 @@ function listSessionLogs(logDir, limit = 200) {
   for (const day of days.sort().reverse()) {
     let files;
     try {
-      files = readdirSync(join2(logDir, day)).filter((f) => f.endsWith(".jsonl"));
+      files = readdirSync(join3(logDir, day)).filter((f) => f.endsWith(".jsonl"));
     } catch {
       continue;
     }
     for (const f of files) {
-      const { header, entries, end } = parseLogFile(join2(logDir, day, f));
+      const { header, entries, end } = parseLogFile(join3(logDir, day, f));
       if (!header) continue;
       out.push({
         id: String(header.connId ?? f.replace(/\.jsonl$/, "")),
@@ -20564,7 +20711,7 @@ function listSessionLogs(logDir, limit = 200) {
 }
 function readSessionLog(logDir, connId) {
   if (!/^[A-Za-z0-9-]{1,64}$/.test(connId)) return null;
-  if (!existsSync(logDir)) return null;
+  if (!existsSync2(logDir)) return null;
   let days;
   try {
     days = readdirSync(logDir).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d));
@@ -20572,8 +20719,8 @@ function readSessionLog(logDir, connId) {
     return null;
   }
   for (const day of days.sort().reverse()) {
-    const file = join2(logDir, day, `${connId}.jsonl`);
-    if (!existsSync(file)) continue;
+    const file = join3(logDir, day, `${connId}.jsonl`);
+    if (!existsSync2(file)) continue;
     const { header, entries, end } = parseLogFile(file);
     if (!header) return null;
     return {
@@ -20595,7 +20742,7 @@ function readSessionLog(logDir, connId) {
 }
 function ensureLogDir(logDir) {
   try {
-    mkdirSync2(logDir, { recursive: true });
+    mkdirSync3(logDir, { recursive: true });
   } catch (e) {
     console.warn("[dsh-hillstone-cli-ops] cannot create oplog dir:", e.message);
   }
@@ -20610,7 +20757,7 @@ var DEFAULT_CONFIG = {
   apiTokenEnabled: true
 };
 function resolveConfig(config, profileDataDir) {
-  const dataDir = config?.dataDir || process.env.DSH_HILLSTONE_DATA_DIR || (profileDataDir ? profileDataDir.replace(/[\\/]+$/, "") + "/hillstone" : "") || join3(homedir(), ".dsh", "dsh-hillstone-cli-ops");
+  const dataDir = config?.dataDir || process.env.DSH_HILLSTONE_DATA_DIR || (profileDataDir ? profileDataDir.replace(/[\\/]+$/, "") + "/hillstone" : "") || join4(homedir(), ".dsh", "dsh-hillstone-cli-ops");
   return {
     dataDir,
     apiPort: config?.apiPort ?? DEFAULT_CONFIG.apiPort,
@@ -20620,19 +20767,19 @@ function resolveConfig(config, profileDataDir) {
 var ALGO = "aes-256-gcm";
 var KEY_FILE = "ops.key";
 function keyPath(dir) {
-  return join3(dir, KEY_FILE);
+  return join4(dir, KEY_FILE);
 }
 function loadKey(dir) {
   const p = keyPath(dir);
-  if (existsSync2(p)) {
+  if (existsSync3(p)) {
     try {
-      return readFileSync2(p);
+      return readFileSync3(p);
     } catch {
     }
   }
   const key = randomBytes(32);
   try {
-    mkdirSync3(dir, { recursive: true });
+    mkdirSync4(dir, { recursive: true });
     writeFileSync(p, key, { mode: 384 });
   } catch {
   }
@@ -20654,62 +20801,54 @@ function decryptSecret(key, payload) {
   decipher.setAuthTag(tag);
   return Buffer.concat([decipher.update(enc), decipher.final()]).toString("utf-8");
 }
-var DEVICES_FILE = "devices.json";
-var POLICIES_FILE = "policies.json";
-function loadStore(dir, key) {
+function loadStore(dir, key, log) {
+  const db = new OpsDb(dir, log);
   const map = /* @__PURE__ */ new Map();
-  const file = join3(dir, DEVICES_FILE);
-  if (existsSync2(file)) {
+  const policies = /* @__PURE__ */ new Map();
+  const migrated = migrateLegacyJson(db, dir, (raw) => JSON.parse(raw));
+  if (migrated.devices || migrated.policies) {
+    log?.info?.(
+      `[dsh-hillstone-cli-ops] \u5DF2\u4ECE JSON \u8FC1\u79FB ${migrated.devices} \u53F0\u8BBE\u5907 / ${migrated.policies} \u6761\u7B56\u7565\u5230 SQLite (ops.db)`
+    );
+  }
+  for (const row of db.deviceRows()) {
     try {
-      const arr = JSON.parse(readFileSync2(file, "utf-8"));
-      for (const d of arr) {
+      const d = JSON.parse(row.json);
+      if (d && d.id) {
         map.set(d.id, { ...d, deviceType: normalizeDeviceType(d.deviceType) });
       }
     } catch {
     }
   }
-  const policies = /* @__PURE__ */ new Map();
-  const pfile = join3(dir, POLICIES_FILE);
-  if (existsSync2(pfile)) {
+  for (const row of db.policyRows()) {
     try {
-      const arr = JSON.parse(readFileSync2(pfile, "utf-8"));
-      for (const p of arr) {
-        if (p && p.id && Array.isArray(p.commands)) {
-          policies.set(p.id, { ...p, enabled: typeof p.enabled === "boolean" ? p.enabled : true });
-        }
+      const p = JSON.parse(row.json);
+      if (p && p.id && Array.isArray(p.commands)) {
+        policies.set(p.id, { ...p, enabled: typeof p.enabled === "boolean" ? p.enabled : true });
       }
     } catch {
     }
   }
   const logDir = logRoot(dir);
   ensureLogDir(logDir);
-  return { dir, key, devices: map, policies, logDir };
+  return { dir, key, devices: map, policies, logDir, db };
 }
 function persistStore(store) {
-  persistDevices(store);
-  persistPolicies(store);
-}
-function persistDevices(store) {
-  try {
-    mkdirSync3(store.dir, { recursive: true });
-    const tmp = join3(store.dir, DEVICES_FILE + ".tmp");
-    const arr = [...store.devices.values()];
-    writeFileSync(tmp, JSON.stringify(arr, null, 2), "utf-8");
-    renameSync(tmp, join3(store.dir, DEVICES_FILE));
-  } catch (e) {
-    console.warn("[dsh-hillstone-cli-ops] persist devices failed:", e.message);
-  }
-}
-function persistPolicies(store) {
-  try {
-    mkdirSync3(store.dir, { recursive: true });
-    const tmp = join3(store.dir, POLICIES_FILE + ".tmp");
-    const arr = [...store.policies.values()];
-    writeFileSync(tmp, JSON.stringify(arr, null, 2), "utf-8");
-    renameSync(tmp, join3(store.dir, POLICIES_FILE));
-  } catch (e) {
-    console.warn("[dsh-hillstone-cli-ops] persist policies failed:", e.message);
-  }
+  if (!store.db) return;
+  store.db.putDevices([...store.devices.values()].map((d) => ({
+    id: d.id,
+    name: d.name,
+    ip: d.ip,
+    updatedAt: d.updatedAt,
+    json: JSON.stringify(d)
+  })));
+  store.db.putPolicies([...store.policies.values()].map((p) => ({
+    id: p.id,
+    name: p.name,
+    enabled: p.enabled,
+    updatedAt: p.updatedAt,
+    json: JSON.stringify(p)
+  })));
 }
 function toDTO(d) {
   const { password: _pw, ...rest } = d;
@@ -21719,9 +21858,9 @@ function probeLlm(ctx) {
 }
 function activate(ctx, config) {
   const resolved = resolveConfig(config, readProfileDir(ctx));
-  mkdirSync3(resolved.dataDir, { recursive: true });
+  mkdirSync4(resolved.dataDir, { recursive: true });
   const key = loadKey(resolved.dataDir);
-  const store = loadStore(resolved.dataDir, key);
+  const store = loadStore(resolved.dataDir, key, ctx.logger);
   const getLlm = probeLlm(ctx);
   const token = randomBytes(24).toString("base64url");
   const server = createServer((req, res) => {
@@ -22207,7 +22346,7 @@ ${(v.closed ?? []).join("\n")}`;
             try {
               const note = `[${(/* @__PURE__ */ new Date()).toISOString()}] tool registration failed: ${e.message}
 `;
-              appendFileSync2(join3(resolved.dataDir, "plugin-errors.log"), note);
+              appendFileSync2(join4(resolved.dataDir, "plugin-errors.log"), note);
             } catch {
             }
           }
@@ -22226,6 +22365,10 @@ ${(v.closed ?? []).join("\n")}`;
         }
         sessions.clear();
         void webLoginForgetAll();
+        try {
+          store.db?.dispose();
+        } catch {
+        }
         try {
           server.close();
         } catch {

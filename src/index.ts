@@ -56,6 +56,7 @@ import type {
   SessionLogDetail,
 } from './types.ts'
 import { normalizeDeviceType } from './types.ts'
+import { OpsDb, migrateLegacyJson } from './store-db.ts'
 import {
   webLogin,
   webLoginClose,
@@ -172,9 +173,6 @@ function decryptSecret(key: Buffer, payload: string): string {
 
 // ---- device store ----------------------------------------------------------
 
-const DEVICES_FILE = 'devices.json'
-const POLICIES_FILE = 'policies.json'
-
 interface Store {
   dir: string
   key: Buffer
@@ -183,68 +181,63 @@ interface Store {
   policies: Map<string, ExecPolicy>
   /** Root for the per-connection audit trail; see src/session-log.ts. */
   logDir: string
+  /** SQLite durable store (v1.1.0). undefined when node:sqlite is unusable. */
+  db?: OpsDb
 }
 
-function loadStore(dir: string, key: Buffer): Store {
+function loadStore(dir: string, key: Buffer, log?: { warn?(m: string): void; info?(m: string): void }): Store {
+  const db = new OpsDb(dir, log)
   const map = new Map<string, Device>()
-  const file = join(dir, DEVICES_FILE)
-  if (existsSync(file)) {
+  const policies = new Map<string, ExecPolicy>()
+  // First activation on a pre-1.1.0 data dir: pull devices.json/policies.json
+  // into SQLite, then rename them *.imported so they can never be re-imported
+  // (a second import would resurrect deleted devices).
+  const migrated = migrateLegacyJson(db, dir, (raw) => JSON.parse(raw) as any)
+  if (migrated.devices || migrated.policies) {
+    log?.info?.(
+      `[dsh-hillstone-cli-ops] 已从 JSON 迁移 ${migrated.devices} 台设备 / ${migrated.policies} 条策略到 SQLite (ops.db)`,
+    )
+  }
+  for (const row of db.deviceRows()) {
     try {
-      const arr = JSON.parse(readFileSync(file, 'utf-8')) as Device[]
-      for (const d of arr) {
+      const d = JSON.parse(row.json) as Device
+      if (d && d.id) {
         // Devices saved before deviceType/webPort existed still have to load.
         map.set(d.id, { ...d, deviceType: normalizeDeviceType(d.deviceType) })
       }
     } catch {
-      /* corrupt — start fresh rather than crash */
+      /* corrupt row — skip rather than crash */
     }
   }
-  const policies = new Map<string, ExecPolicy>()
-  const pfile = join(dir, POLICIES_FILE)
-  if (existsSync(pfile)) {
+  for (const row of db.policyRows()) {
     try {
-      const arr = JSON.parse(readFileSync(pfile, 'utf-8')) as ExecPolicy[]
-      for (const p of arr) {
-        if (p && p.id && Array.isArray(p.commands)) {
-          policies.set(p.id, { ...p, enabled: typeof p.enabled === 'boolean' ? p.enabled : true })
-        }
+      const p = JSON.parse(row.json) as ExecPolicy
+      if (p && p.id && Array.isArray(p.commands)) {
+        policies.set(p.id, { ...p, enabled: typeof p.enabled === 'boolean' ? p.enabled : true })
       }
     } catch {
-      /* corrupt — start fresh rather than crash */
+      /* corrupt row — skip rather than crash */
     }
   }
   const logDir = logRoot(dir)
   ensureLogDir(logDir)
-  return { dir, key, devices: map, policies, logDir }
+  return { dir, key, devices: map, policies, logDir, db }
 }
 
+/**
+ * Write-through persistence: the in-memory maps stay the live authority and
+ * every mutation flushes the full snapshot to SQLite in one transaction. With
+ * tens of rows this is microseconds; the old whole-JSON rewrite had exactly
+ * the same shape, so call sites did not have to change.
+ */
 function persistStore(store: Store): void {
-  persistDevices(store)
-  persistPolicies(store)
-}
-
-function persistDevices(store: Store): void {
-  try {
-    mkdirSync(store.dir, { recursive: true })
-    const tmp = join(store.dir, DEVICES_FILE + '.tmp')
-    const arr = [...store.devices.values()]
-    writeFileSync(tmp, JSON.stringify(arr, null, 2), 'utf-8')
-    renameSync(tmp, join(store.dir, DEVICES_FILE))
-  } catch (e) {
-    console.warn('[dsh-hillstone-cli-ops] persist devices failed:', (e as Error).message)
-  }
-}
-
-function persistPolicies(store: Store): void {
-  try {
-    mkdirSync(store.dir, { recursive: true })
-    const tmp = join(store.dir, POLICIES_FILE + '.tmp')
-    const arr = [...store.policies.values()]
-    writeFileSync(tmp, JSON.stringify(arr, null, 2), 'utf-8')
-    renameSync(tmp, join(store.dir, POLICIES_FILE))
-  } catch (e) {
-    console.warn('[dsh-hillstone-cli-ops] persist policies failed:', (e as Error).message)
-  }
+  if (!store.db) return
+  store.db.putDevices([...store.devices.values()].map((d) => ({
+    id: d.id, name: d.name, ip: d.ip, updatedAt: d.updatedAt, json: JSON.stringify(d),
+  })))
+  store.db.putPolicies([...store.policies.values()].map((p) => ({
+    id: p.id, name: p.name, enabled: p.enabled, updatedAt: p.updatedAt, json: JSON.stringify(p),
+  })))
 }
 
 function toDTO(d: Device): DeviceDTO {
@@ -1765,7 +1758,7 @@ function activate(ctx: ContextLike, config?: Partial<Config>): void {
   const resolved = resolveConfig(config, readProfileDir(ctx))
   mkdirSync(resolved.dataDir, { recursive: true })
   const key = loadKey(resolved.dataDir)
-  const store = loadStore(resolved.dataDir, key)
+  const store = loadStore(resolved.dataDir, key, ctx.logger)
   const getLlm = probeLlm(ctx)
 
   const token = randomBytes(24).toString('base64url')
@@ -2484,6 +2477,11 @@ function activate(ctx: ContextLike, config?: Partial<Config>): void {
         // that left them behind would strand a browser nobody can close from
         // the panel, holding the device's profile directory open.
         void webLoginForgetAll()
+        try {
+          store.db?.dispose()
+        } catch {
+          /* ignore */
+        }
         try {
           server.close()
         } catch {
