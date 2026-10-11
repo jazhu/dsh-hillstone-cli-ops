@@ -20770,6 +20770,7 @@ function echoToOperators(session, line) {
 var PROMPT_RE = /(?:#|\$|>)\s*$/;
 var PAGER_RE = /--More--[ \t]*[\u0000]?\s*$/;
 var PAGER_MAX_PAGES = 400;
+var INIT_COMMAND_TIMEOUT_MS = 1e4;
 function busySessions() {
   const out = [];
   for (const s of sessions.values()) if (s.agentActive) out.push(s.connId);
@@ -20913,9 +20914,24 @@ function connectDevice(store, deviceId, size, originSessionId) {
           session.log.event("\u4F1A\u8BDD\u88AB\u8BBE\u5907\u5173\u95ED");
           broadcast(session, "status", { status: "closed" });
         });
-        enqueueWrite(session, "terminal length 0\r").catch(() => {
+        let initSent = false;
+        let initTail = "";
+        const initTimer = setTimeout(() => {
+          if (!initSent) session.log.event("\u672A\u7B49\u5230\u8BBE\u5907\u63D0\u793A\u7B26\uFF0C\u8DF3\u8FC7 terminal length 0 \u4E0B\u53D1");
+        }, INIT_COMMAND_TIMEOUT_MS);
+        const sendInit = () => {
+          if (initSent || session.status !== "ready" || !session.shell) return;
+          initSent = true;
+          clearTimeout(initTimer);
+          enqueueWrite(session, "terminal length 0\r").catch(() => {
+          });
+          session.log.event("\u5DF2\u4E0B\u53D1\u521D\u59CB\u5316\u547D\u4EE4 terminal length 0");
+        };
+        shell.on("data", (chunk) => {
+          if (initSent) return;
+          initTail = (initTail + chunk.toString("utf-8")).slice(-2e3);
+          if (promptReturned(initTail)) sendInit();
         });
-        session.log.event("\u5DF2\u4E0B\u53D1\u521D\u59CB\u5316\u547D\u4EE4 terminal length 0");
         resolve({
           connId,
           deviceId,
