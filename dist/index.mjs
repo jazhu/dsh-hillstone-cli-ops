@@ -20913,6 +20913,9 @@ function connectDevice(store, deviceId, size, originSessionId) {
           session.log.event("\u4F1A\u8BDD\u88AB\u8BBE\u5907\u5173\u95ED");
           broadcast(session, "status", { status: "closed" });
         });
+        enqueueWrite(session, "terminal length 0\r").catch(() => {
+        });
+        session.log.event("\u5DF2\u4E0B\u53D1\u521D\u59CB\u5316\u547D\u4EE4 terminal length 0");
         resolve({
           connId,
           deviceId,

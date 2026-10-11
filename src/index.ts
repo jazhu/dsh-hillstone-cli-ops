@@ -629,12 +629,17 @@ function connectDevice(
           session.log.event('会话被设备关闭')
           broadcast(session, 'status', { status: 'closed' })
         })
-        // Deliberately NOT sending `terminal length 0` here. On the SG-6000 it
-        // is not accepted — the device answers with `^-----unrecognized
-        // keyword` and keeps paginating, so every session's first screen of
-        // output carried a bogus error. Paging is handled where it actually
-        // happens instead: runCommandInSession and the UI both answer a
-        // `--More--` with a space.
+        // Send `terminal length 0` once the shell is up, so long output comes
+        // back in one stream instead of stopping at `--More--`. On devices
+        // that do not accept it the line is answered with
+        // `^-----unrecognized keyword` and paging continues — harmless, and
+        // the `--More--` answer in runCommandInSession / the UI stays as the
+        // fallback. The write goes through the same ordered chain as every
+        // other keystroke, so it can never interleave with the operator.
+        enqueueWrite(session, 'terminal length 0\r').catch(() => {
+          /* shell closed before the init line was written — nothing to recover */
+        })
+        session.log.event('已下发初始化命令 terminal length 0')
         resolve({
           connId,
           deviceId,

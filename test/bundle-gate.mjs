@@ -95,9 +95,9 @@ const checks = [
   // CJK label invisible (white-on-white) in the dark theme.
   ['client  select fill pinned to theme', /\.ops-select \{[^}]*background-color/, client],
   ['client  select option fill pinned', /\.ops-select option \{[^}]*background-color/, client],
-  // m03353 — an agent connect must land the user on the terminal page, and the
-  // injected `terminal length 0` is gone: the SG-6000 rejects it and paginates
-  // anyway, so every session opened with a bogus device error on screen.
+  // m03353 — an agent connect must land the user on the terminal page.
+  // (The `terminal length 0` init line is back since v1.0.1 by user request;
+  //  the presence assertion lives below, near the other host checks.)
   ['host    send_input auto-submits a bare command', /looksLikeCommand/, host],
   ['client  host-side connect opens the panel', /revealSidebar = \(originSessionId\)|revealSidebar = \(originSessionId\)/, client],
   ['client  connect watch polls /conn', /REVEAL_POLL_MS/, client],
@@ -254,14 +254,14 @@ const guideNamesPolicyTab = clientText.includes('「执行策略」限定')
 console.log(`${guideNamesPolicyTab ? '  ok  ' : '  MISS'} client  the tab guide names the 执行策略 tab (m06703)`)
 if (!guideNamesPolicyTab) bad++
 
-// Assert the ABSENCE directly: every check above greps dist/, so a removed
-// feature can only be proven gone by looking for it. The SG-6000 answers
-// `terminal length 0` with `^-----unrecognized keyword` and paginates anyway,
-// so injecting it on connect just put a bogus device error at the top of every
-// session. Paging is handled where it happens (--More-- -> space).
+// v1.0.1 (user request) — every new shell gets `terminal length 0` right after
+// the pty opens, so long output streams back instead of stopping at `--More--`.
+// Devices that reject it just answer `^-----unrecognized keyword` and keep
+// paginating; the --More-- -> space answer stays as the fallback, so the
+// injection is strictly additive and must be PRESENT, not absent.
 const terminalLength = /terminal length 0/.test(host)
-console.log(`${terminalLength ? '  MISS' : '  ok  '} host    no terminal length 0 injection (m03353)`)
-if (terminalLength) bad++
+console.log(`${terminalLength ? '  ok  ' : '  MISS'} host    connect injects terminal length 0 (v1.0.1)`)
+if (!terminalLength) bad++
 
 // m03528 — the conversation-header 「设备运维」 button was removed: the right
 // rail is always there, so the second entry point only duplicated the tab and
